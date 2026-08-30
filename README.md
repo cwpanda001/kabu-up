@@ -46,7 +46,7 @@ Secret は登録後に中身を再表示できない。控えは手元に残し�
 
 #### Slack : Incoming Webhook（所要3分・推奨）
 
-1. https://api.slack.com/apps → **Create New App** → **From scratch** → 名前 `tdnet-watch`、ワークスペースを選択
+1. https://api.slack.com/apps → **Create New App** → **Blank app**（旧「From scratch」。AI agent / Starter app は不要な機能が付くので選ばない）→ 名前 `tdnet-watch`、ワークスペースを選択
 2. 左メニュー **Incoming Webhooks** → **Activate Incoming Webhooks** を On
 3. 下部の **Add New Webhook to Workspace** → 通知先チャンネルを選んで **許可する**
 4. 生成された `https://hooks.slack.com/services/T.../B.../...` をコピー
@@ -56,7 +56,7 @@ Secret は登録後に中身を再表示できない。控えは手元に残し�
 
 #### Slack : Bot token（Webhook が使えない場合）
 
-1〜2 の代わりに、アプリ作成後：
+アプリ作成（Blank app）までは同じ。そのあと：
 
 1. 左メニュー **OAuth & Permissions** → Scopes → **Bot Token Scopes** に `chat:write` を追加
 2. ページ上部 **Install to Workspace** → 許可 → `xoxb-` で始まる **Bot User OAuth Token** をコピー → Secret `SLACK_BOT_TOKEN`
