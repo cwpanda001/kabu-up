@@ -135,10 +135,18 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="通知を送らず標準出力へ")
     ap.add_argument("--no-state", action="store_true", help="state/seen.json を読み書きしない")
     ap.add_argument("--force", action="store_true", help="休場日でも実行")
+    ap.add_argument("--test-notify", action="store_true",
+                    help="テスト通知を1件送って終了（通知先の設定確認用）")
     args = ap.parse_args()
 
     now = datetime.now(JST)
     today = now.date()
+
+    if args.test_notify:
+        send(f"【tdnet-watch テスト通知】{now:%Y-%m-%d %H:%M}\n"
+             "この通知が見えていれば通知先の設定は正常です。", dry_run=args.dry_run)
+        print("テスト通知を送信した")
+        return
     if not args.sample and not args.force and not is_trading_day(today):
         print(f"{today} は休場日。終了")
         return

@@ -79,12 +79,24 @@ https://console.anthropic.com → API Keys → Create Key → Secret `ANTHROPIC_
 未設定でも動く（キーワード＋PDF本文のヒューリスティックで判定）。
 
 ### 3. 動作確認
-Actions タブ → `tdnet-watch` → **Run workflow**。平日 9:00〜18:00 JST に手動実行すればその日の開示を実際に処理する。休場日はログに「休場日。終了」と出て正常。
+
+**通知先の設定確認（休場日でもできる）**
+
+Actions タブ → `tdnet-watch` → **Run workflow** → **`test_notify` にチェック** → 実行。
+テスト通知が1件飛ぶだけなので、Secret が正しく登録できているかを平日を待たずに確認できる。
+
+**通常の動作確認**
+
+同じく Run workflow（チェックなし）。平日 9:00〜18:00 JST ならその日の開示を実際に処理する。
+**休場日は「休場日。終了」と出て通知処理まで到達しない**ので、Slack に何も来なくても正常。
+休場日に一連の流れを流したいときは `force` にチェック（ただし当日株価が無いためチャート条件は全件落ちる）。
 
 ローカルで確認する場合:
 ```bash
 pip install -r requirements.txt
 python tests/test_basic.py                                          # ネット不要の単体テスト
+python main.py --test-notify                                        # 通知先へテスト通知を1件送る
+python main.py --test-notify --dry-run                              # 送らずに本文だけ確認
 python main.py --sample sample/tdnet_sample.html --dry-run --no-state  # サンプル開示で一通り動かす
 python main.py --dry-run --force                                    # 実際のTDnetを読む（通知はしない）
 ```

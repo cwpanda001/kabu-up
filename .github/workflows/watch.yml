@@ -7,6 +7,15 @@ on:
     # UTC 7:00-8:59 の30分おき              = JST 16:00-17:59（引け後開示）
     - cron: "0,30 7-8 * * 1-5"
   workflow_dispatch:
+    inputs:
+      test_notify:
+        description: "テスト通知だけ送って終了（通知先の設定確認）"
+        type: boolean
+        default: false
+      force:
+        description: "休場日でも通常実行する"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -41,7 +50,7 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python main.py
+        run: python main.py ${{ inputs.test_notify && '--test-notify' || '' }} ${{ inputs.force && '--force' || '' }}
 
       - name: Save state
         run: |
