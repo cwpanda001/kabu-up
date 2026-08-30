@@ -105,6 +105,8 @@ python main.py --dry-run --force                                    # 実際のT
 python main.py --stock 7203 --dry-run                               # 銘柄照会（送らず標準出力へ）
 ```
 
+push や Pull Request のたびに CI（`.github/workflows/ci.yml`）が同じ単体テストを自動実行する。
+
 ### 4. 放置する
 cron が平日 9:00〜17:59 JST に15分おきに動く。状態ファイル `state/seen.json` を bot が commit するので、同じ開示は二度通知されない。
 

@@ -1,0 +1,33 @@
+name: ci
+
+# push / Pull Request のたびにネット不要の単体テストを回す。
+# 監視本体（watch.yml）の cron とは独立。state 更新の bot commit は
+# メッセージの [skip ci] により対象外。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:   # 手動でも回せる（動作確認用）
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 構文チェック
+        run: python -m compileall -q .
+
+      - name: 単体テスト（ネット不要）
+        run: python tests/test_basic.py
