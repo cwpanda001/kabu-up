@@ -1,6 +1,6 @@
 # tdnet-watch
 
-TDnet（適時開示）を15分おきに監視し、**好材料 × 上昇トレンドのチャート** が揃った日本株だけを LINE / Discord に通知する最小構成ツール。GitHub Actions の無料枠で常駐する。
+TDnet（適時開示）を15分おきに監視し、**好材料 × 上昇トレンドのチャート** が揃った日本株だけを Slack / Discord / LINE に通知する最小構成ツール。GitHub Actions の無料枠で常駐する。
 
 ```
 TDnet一覧HTML ─→ キーワード一次判定 ─→ (方向不明ならPDF本文で上方/下方推定) ─→ yfinanceでチャート条件 ─→ 通知
@@ -29,16 +29,54 @@ TDnet一覧HTML ─→ キーワード一次判定 ─→ (方向不明ならPDF
 このフォルダをそのまま GitHub の新規リポジトリに push する。**Public 推奨**（Actions の実行時間が無制限。Private でも月2,000分あるので足りる）。
 
 ### 2. 通知先を決めて Secrets に登録
-リポジトリの Settings → Secrets and variables → Actions → New repository secret。
+リポジトリの **Settings → Secrets and variables → Actions → New repository secret**。
 
-| Secret | 取り方 | 備考 |
+必要なものだけ登録すればよい。**登録した通知先すべてに送る**（Slack と Discord の両方に、なども可）。
+ひとつも登録しなければ Actions のログに出るだけで、その状態でも安全に動く。
+
+| Secret 名 | 用途 | 必要性 |
 |---|---|---|
-| `DISCORD_WEBHOOK_URL` | Discord のサーバー設定 → 連携サービス → ウェブフック → URL をコピー | **無制限・一番簡単。まずこれで動かすのを推奨** |
-| `LINE_CHANNEL_ACCESS_TOKEN` | LINE公式アカウントを**通知専用に新規作成** → Messaging API を有効化 → LINE Developers で長期チャネルアクセストークンを発行 | 無料枠は月200通。エルメで運用中のアカウントは配信数の枠を食うので使わない |
-| `LINE_USER_ID` | LINE Developers → チャネル基本設定 → 「あなたのユーザーID」 | 自分のLINEで通知用アカウントを友だち追加しておくこと |
-| `ANTHROPIC_API_KEY` | console.anthropic.com | 任意。あると「業績予想の修正」等の方向判定と、材料の強弱の見極めを Claude Haiku がやる（1判定 ≒ 0.3円） |
+| `SLACK_WEBHOOK_URL` | Slack Incoming Webhook。**一番簡単。まずこれを推奨** | 通知先はどれか1つあればよい |
+| `SLACK_BOT_TOKEN` ＋ `SLACK_CHANNEL` | Slack Bot。Webhook を禁止しているワークスペース向け | 〃 |
+| `DISCORD_WEBHOOK_URL` | Discord Webhook | 〃 |
+| `LINE_CHANNEL_ACCESS_TOKEN` ＋ `LINE_USER_ID` | LINE Messaging API push（無料枠 月200通） | 〃 |
+| `ANTHROPIC_API_KEY` | Claude が「業績予想の修正」の方向と材料の強弱を判定 | 任意（1判定 ≒ 0.3円） |
 
-どれも無い場合は Actions のログに出力されるだけ。
+Secret は登録後に中身を再表示できない。控えは手元に残しておくこと。
+
+#### Slack : Incoming Webhook（所要3分・推奨）
+
+1. https://api.slack.com/apps → **Create New App** → **From scratch** → 名前 `tdnet-watch`、ワークスペースを選択
+2. 左メニュー **Incoming Webhooks** → **Activate Incoming Webhooks** を On
+3. 下部の **Add New Webhook to Workspace** → 通知先チャンネルを選んで **許可する**
+4. 生成された `https://hooks.slack.com/services/T.../B.../...` をコピー
+5. GitHub に Secret 名 `SLACK_WEBHOOK_URL` で登録
+
+このURLを知っていれば誰でもそのチャンネルに投稿できる。**コードに直書きせず必ず Secret に入れる。**
+
+#### Slack : Bot token（Webhook が使えない場合）
+
+1〜2 の代わりに、アプリ作成後：
+
+1. 左メニュー **OAuth & Permissions** → Scopes → **Bot Token Scopes** に `chat:write` を追加
+2. ページ上部 **Install to Workspace** → 許可 → `xoxb-` で始まる **Bot User OAuth Token** をコピー → Secret `SLACK_BOT_TOKEN`
+3. Slack で通知先チャンネルを開き `/invite @tdnet-watch` で Bot を招待する（**忘れると `not_in_channel` エラー**）
+4. チャンネル名を右クリック → リンクをコピー → 末尾の `C0123ABCD` がチャンネルID → Secret `SLACK_CHANNEL`
+
+#### Discord
+
+サーバー設定 → 連携サービス → ウェブフック → 新しいウェブフック → チャンネルを選んで **ウェブフックURLをコピー** → Secret `DISCORD_WEBHOOK_URL`。
+
+#### LINE
+
+LINE公式アカウントを**通知専用に新規作成**し、Messaging API を有効化。LINE Developers で長期のチャネルアクセストークンを発行 → `LINE_CHANNEL_ACCESS_TOKEN`。チャネル基本設定の「あなたのユーザーID」→ `LINE_USER_ID`。自分のLINEでその通知用アカウントを友だち追加しておく。
+
+無料枠は月200通。エルメ等で運用中のアカウントは配信数の枠を食うので使わない。
+
+#### Anthropic（任意）
+
+https://console.anthropic.com → API Keys → Create Key → Secret `ANTHROPIC_API_KEY`。
+未設定でも動く（キーワード＋PDF本文のヒューリスティックで判定）。
 
 ### 3. 動作確認
 Actions タブ → `tdnet-watch` → **Run workflow**。平日 9:00〜18:00 JST に手動実行すればその日の開示を実際に処理する。休場日はログに「休場日。終了」と出て正常。
