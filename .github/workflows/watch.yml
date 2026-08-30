@@ -8,6 +8,10 @@ on:
     - cron: "0,30 7-8 * * 1-5"
   workflow_dispatch:
     inputs:
+      stock_codes:
+        description: "銘柄コードを入力すると現在状況を通知（カンマ区切り可。例: 7203,6758。指定時はこの照会だけ実行）"
+        type: string
+        default: ""
       test_notify:
         description: "テスト通知だけ送って終了（通知先の設定確認）"
         type: boolean
@@ -49,8 +53,15 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python main.py ${{ inputs.test_notify && '--test-notify' || '' }} ${{ inputs.force && '--force' || '' }}
+          STOCK_CODES: ${{ inputs.stock_codes }}
+        run: |
+          if [ -n "${STOCK_CODES}" ]; then
+            python main.py --stock "${STOCK_CODES}"
+          else
+            python main.py ${{ inputs.test_notify && '--test-notify' || '' }} ${{ inputs.force && '--force' || '' }}
+          fi
 
       - name: Save state
         run: |

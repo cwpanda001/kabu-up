@@ -4,6 +4,7 @@
   SLACK_BOT_TOKEN + SLACK_CHANNEL          : Slack Bot（Webhookを禁止しているワークスペース向け）
   DISCORD_WEBHOOK_URL                      : Discord Webhook（無制限）
   LINE_CHANNEL_ACCESS_TOKEN + LINE_USER_ID : LINE Messaging API push（無料枠 月200通）
+  NOTIFY_WEBHOOK_URL                       : 任意のURLへ {"text": "..."} を JSON POST（自作API等）
 
 複数設定した場合は全部に送る。
 """
@@ -66,6 +67,13 @@ def send(text: str, dry_run: bool = False) -> None:
             )
             if r.status_code != 200:
                 print(f"[notify] LINE error {r.status_code}: {r.text[:200]}")
+        sent = True
+
+    wh = os.environ.get("NOTIFY_WEBHOOK_URL")
+    if wh:
+        r = requests.post(wh, json={"text": text}, timeout=20)
+        if r.status_code >= 300:
+            print(f"[notify] webhook error {r.status_code}: {r.text[:200]}")
         sent = True
 
     if not sent:

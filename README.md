@@ -7,6 +7,8 @@ TDnet一覧HTML ─→ キーワード一次判定 ─→ (方向不明ならPDF
                                         └─ ANTHROPIC_API_KEY があれば Claude が最終判定（任意）
 ```
 
+監視とは別に、銘柄コード（トヨタなら `7203`）を入力してその銘柄の現在状況を通知先へ送る手動照会もできる（→ [銘柄コードを指定して状況を照会する](#銘柄コードを指定して状況を照会する)）。
+
 ## 通知の中身
 
 ```
@@ -40,6 +42,7 @@ TDnet一覧HTML ─→ キーワード一次判定 ─→ (方向不明ならPDF
 | `SLACK_BOT_TOKEN` ＋ `SLACK_CHANNEL` | Slack Bot。Webhook を禁止しているワークスペース向け | 〃 |
 | `DISCORD_WEBHOOK_URL` | Discord Webhook | 〃 |
 | `LINE_CHANNEL_ACCESS_TOKEN` ＋ `LINE_USER_ID` | LINE Messaging API push（無料枠 月200通） | 〃 |
+| `NOTIFY_WEBHOOK_URL` | 自作APIなど任意のURLへ `{"text": "..."}` を JSON POST | 〃 |
 | `ANTHROPIC_API_KEY` | Claude が「業績予想の修正」の方向と材料の強弱を判定 | 任意（1判定 ≒ 0.3円） |
 
 Secret は登録後に中身を再表示できない。控えは手元に残しておくこと。
@@ -99,10 +102,45 @@ python main.py --test-notify                                        # 通知先�
 python main.py --test-notify --dry-run                              # 送らずに本文だけ確認
 python main.py --sample sample/tdnet_sample.html --dry-run --no-state  # サンプル開示で一通り動かす
 python main.py --dry-run --force                                    # 実際のTDnetを読む（通知はしない）
+python main.py --stock 7203 --dry-run                               # 銘柄照会（送らず標準出力へ）
 ```
 
 ### 4. 放置する
 cron が平日 9:00〜17:59 JST に15分おきに動く。状態ファイル `state/seen.json` を bot が commit するので、同じ開示は二度通知されない。
+
+## 銘柄コードを指定して状況を照会する
+
+気になる銘柄のコードを入力すると、その銘柄の現在状況をまとめて **登録している通知先すべて**（Slack / Discord / LINE / `NOTIFY_WEBHOOK_URL` の自作API）へ送る。
+
+**GitHub Actions から**: Actions タブ → `tdnet-watch` → **Run workflow** → `stock_codes` に `7203` と入力（複数は `7203,6758` のようにカンマ区切り）→ 実行。1〜2分で通知が届く。
+
+**ローカルから**:
+```bash
+python main.py --stock 7203              # 通知先へ送る
+python main.py --stock 7203 --dry-run    # 送らずに標準出力で確認
+```
+
+通知の中身:
+
+```
+【銘柄状況】08/31 10:30
+
+■ 7203 Toyota Motor Corporation
+ 開示 10:00｜通期業績予想の修正（上方修正）に関するお知らせ〔上方修正〕
+ 株価 2,850円（前日比 +1.5%）
+ トレンド 上昇（現在値>25MA>75MA）
+ 25MA 2,780 ／ 75MA 2,650 ／ RSI 62 ／ 出来高 3.7倍
+ 損切り目安 2,720円（−2ATR）
+ チャート条件 合格 → エントリー候補
+
+※判断材料であり売買の推奨ではない
+```
+
+- チャート条件の判定基準は監視と同じ（[判定ロジック](#判定ロジック)参照）。未達のときは理由（出来高不足・RSI過熱など）を列挙する
+- 開示行は当日＋前営業日の適時開示から拾う（無ければ「開示 なし」）
+- 休場日・引け後は直近営業日の終値で表示する（`（08/29終値）` のように付記）
+- コードは4桁。`130A` のような英字入りの新方式コードや、TDnet式の5桁（`72030`）も受け付ける
+- 社名は yfinance 由来のため英語表記になる
 
 ## 判定ロジック
 

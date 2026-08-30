@@ -66,4 +66,40 @@ assert not s.passed and "当日株価未取得" in s.reasons
 s = evaluate(make_df(today, gap=3.0), datetime(2026, 8, 31, 16, 0, tzinfo=JST))
 assert s.after_close and s.entry_label == "様子見（押し目待ち）"
 
+# --- 銘柄状況レポート（--stock） ---
+import stock_info
+from stock_info import fmt_stock, normalize_code, parse_codes, yen
+
+assert yen(1234.0) == "1,234" and yen(1234.5) == "1,234.5" and yen(float("nan")) == "-"
+assert normalize_code(" 7203 ") == "7203"
+assert normalize_code("72030") == "7203"                       # TDnet式5桁
+assert normalize_code("130a") == "130A"                        # 英字入りの新方式コード
+assert normalize_code("999") is None and normalize_code("72031") is None
+assert normalize_code("ABCD") is None
+assert parse_codes("7203, 6758、9984 7203") == ["7203", "6758", "9984"]
+
+s = evaluate(make_df(today, last_vol_mult=1.0), now)
+txt = fmt_stock("7203", "トヨタ自動車", s, today, today, [" 開示 なし（当日＋前営業日）"])
+assert txt.startswith("■ 7203 トヨタ自動車")
+assert "チャート条件 合格 → エントリー候補" in txt and "開示 なし" in txt
+assert "トレンド 上昇" in txt and "損切り目安" in txt
+txt = fmt_stock("7203", "トヨタ自動車", evaluate(make_df(today, trend=-1.0), now), today, today)
+assert "チャート条件 未達" in txt and "上昇トレンド不成立" in txt
+txt = fmt_stock("7203", "トヨタ自動車", evaluate(make_df(today - timedelta(days=3)), now),
+                today - timedelta(days=3), today)
+assert "（08/28終値）" in txt and "出来高 -" in txt              # 休場日は直近終値で表示
+txt = fmt_stock("1305", "", None)
+assert txt.startswith("■ 1305\n") and "株価データ無し" in txt
+
+# stock_report をネットワーク無しで一気通貫（取得系を差し替え）
+stock_info.fetch_history = lambda c: make_df(today, last_vol_mult=1.0)
+stock_info.fetch_name = lambda c: "テスト株式会社"
+stock_info.fetch_day = lambda d: parse_list(
+    open("sample/tdnet_sample.html", encoding="utf-8").read(), d)
+rep = stock_info.stock_report("7203, xxxx", now, disclosure_days=[today])
+assert "【銘柄状況】08/31 10:00" in rep
+assert "■ 7203 テスト株式会社" in rep and "〔上方修正〕" in rep
+assert "■ xxxx\n 無効なコード" in rep
+assert rep.rstrip().endswith("※判断材料であり売買の推奨ではない")
+
 print("all tests passed")
