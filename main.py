@@ -6,6 +6,7 @@
   python main.py --sample sample/tdnet_sample.html --dry-run --no-state
                                        # TDnet の代わりにサンプルHTMLで動作確認
   python main.py --force               # 休場日でも実行
+  python main.py --stock 7203          # 銘柄コードを指定して現在状況を通知
 
 状態は state/seen.json に持つ（開示IDごとに notified / pending / skipped）。
 pending = 材料はポジティブだがチャート条件が未達。同日中（引け後開示は翌営業日中）は毎回再判定する。
@@ -23,6 +24,7 @@ import config
 from judge import judge
 from notify import send
 from screener import JST, screen
+from stock_info import stock_report, yen
 from tdnet import Disclosure, fetch_day, parse_list
 
 STATE_PATH = "state/seen.json"
@@ -60,12 +62,6 @@ def save_state(state: dict, today: date) -> None:
         json.dump(state, f, ensure_ascii=False, indent=0)
 
 
-def _yen(p: float) -> str:
-    if p != p:  # NaN
-        return "-"
-    return f"{p:,.0f}" if p == int(p) else f"{p:,.1f}"
-
-
 def fmt_hit(item: Disclosure, v: dict, s, today: str) -> str:
     label = "／".join(v["labels"])
     if v.get("ai"):
@@ -77,9 +73,9 @@ def fmt_hit(item: Disclosure, v: dict, s, today: str) -> str:
         f"■ {item.code4} {item.name}",
         f" 開示 {day}{item.time}｜{item.title}",
         f" 判定 {label}",
-        f" 株価 {_yen(s.price)}円（前日比 {s.gap_pct:+.1f}%）→ {s.entry_label}",
-        f" 25MA {_yen(s.ma25)} ／ 75MA {_yen(s.ma75)} ／ RSI {s.rsi:.0f} ／ 出来高 {s.vol_ratio:.1f}倍",
-        f" 損切り目安 {_yen(s.stop)}円（−{config.ATR_STOP_MULT:g}ATR）",
+        f" 株価 {yen(s.price)}円（前日比 {s.gap_pct:+.1f}%）→ {s.entry_label}",
+        f" 25MA {yen(s.ma25)} ／ 75MA {yen(s.ma75)} ／ RSI {s.rsi:.0f} ／ 出来高 {s.vol_ratio:.1f}倍",
+        f" 損切り目安 {yen(s.stop)}円（−{config.ATR_STOP_MULT:g}ATR）",
         f" {item.url}",
     ])
 
@@ -137,6 +133,8 @@ def main() -> None:
     ap.add_argument("--force", action="store_true", help="休場日でも実行")
     ap.add_argument("--test-notify", action="store_true",
                     help="テスト通知を1件送って終了（通知先の設定確認用）")
+    ap.add_argument("--stock", metavar="CODES",
+                    help="銘柄コードを指定して現在状況を通知して終了（カンマ区切りで複数可。例: 7203,6758）")
     args = ap.parse_args()
 
     now = datetime.now(JST)
@@ -146,6 +144,13 @@ def main() -> None:
         send(f"【tdnet-watch テスト通知】{now:%Y-%m-%d %H:%M}\n"
              "この通知が見えていれば通知先の設定は正常です。", dry_run=args.dry_run)
         print("テスト通知を送信した")
+        return
+    if args.stock:
+        # 休場日でも動く（直近営業日の終値で表示される）
+        send(stock_report(args.stock, now,
+                          disclosure_days=[today, prev_trading_day(today)]),
+             dry_run=args.dry_run)
+        print(f"銘柄状況を送信した: {args.stock}")
         return
     if not args.sample and not args.force and not is_trading_day(today):
         print(f"{today} は休場日。終了")
