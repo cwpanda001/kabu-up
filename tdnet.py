@@ -1,6 +1,6 @@
 """TDnet（適時開示情報閲覧サービス）の日別一覧ページを取得してパースする。
 
-一覧URL: https://www.release.tdnet.info/inbv/I_list_{page:03d}_{YYYYMMDD}.html
+一覧URL: https://www.release.tdnet.info/inbs/I_list_{page:03d}_{YYYYMMDD}.html
 公式APIは無いのでHTMLを読む。マークアップが変わったら parse_list() を直す。
 """
 import os
@@ -12,7 +12,7 @@ from datetime import date
 import requests
 from bs4 import BeautifulSoup
 
-BASE = "https://www.release.tdnet.info/inbv/"
+BASE = "https://www.release.tdnet.info/inbs/"
 HEADERS = {"User-Agent": "Mozilla/5.0 (tdnet-watch; personal use)"}
 
 
@@ -88,6 +88,8 @@ def fetch_day(d: date, max_pages: int = 30) -> list[Disclosure]:
             print(f"[tdnet] fetch error {url}: {e}")
             break
         if r.status_code != 200:
+            if p == 1:
+                print(f"[tdnet] HTTP {r.status_code} {url}")
             break
         page = parse_list(_decode(r.content), d)
         if not page:
