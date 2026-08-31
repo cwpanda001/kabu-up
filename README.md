@@ -20,7 +20,7 @@ TDnet一覧HTML ─→ キーワード一次判定 ─→ (方向不明ならPDF
  株価 2,850円（前日比 +1.5%）→ エントリー候補
  25MA 2,780 ／ 75MA 2,650 ／ RSI 62 ／ 出来高 3.7倍
  損切り目安 2,720円（−2ATR）
- https://www.release.tdnet.info/inbv/xxxx.pdf
+ https://www.release.tdnet.info/inbs/xxxx.pdf
 ```
 
 「何円まで上がる」は出さない。出せるのは **見送り条件** と **損切り目安** まで（目標値は次段階の J-Quants バックテストで統計として出す）。
