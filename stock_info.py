@@ -11,15 +11,10 @@ import time
 from datetime import date, datetime
 
 import config
+from chart_context import analyze, context_lines, earnings_note, market_condition, stance, yen
 from judge import keyword_judge
-from screener import JST, evaluate, fetch_history
+from screener import JST, evaluate, fetch_history, fetch_market, next_earnings_date
 from tdnet import fetch_day
-
-
-def yen(p: float) -> str:
-    if p != p:  # NaN
-        return "-"
-    return f"{p:,.0f}" if p == int(p) else f"{p:,.1f}"
 
 
 def normalize_code(raw: str) -> str | None:
@@ -68,7 +63,8 @@ def _disc_lines(code4: str, items: list | None, today_iso: str) -> list[str]:
 
 
 def fmt_stock(code4: str, name: str, s, data_date: date | None = None,
-              today: date | None = None, disc_lines: list[str] | None = None) -> str:
+              today: date | None = None, disc_lines: list[str] | None = None,
+              ctx=None, earn: str = "", mkt_label: str = "") -> str:
     """1銘柄分のレポート。s は screener.Screen（None = 株価データ無し）。"""
     lines = [f"■ {code4} {name}".rstrip()]
     lines += disc_lines or []
@@ -88,6 +84,11 @@ def fmt_stock(code4: str, name: str, s, data_date: date | None = None,
         f" 損切り目安 {yen(s.stop)}円（−{config.ATR_STOP_MULT:g}ATR）",
         f" チャート条件 {'合格 → ' + s.entry_label if s.passed else '未達（' + '、'.join(s.reasons) + '）'}",
     ]
+    if ctx is not None:
+        lines += context_lines(ctx)
+        if earn:
+            lines.append(f" {earn}")
+        lines.append(f" 総合 {stance(ctx, mkt_label)}")
     return "\n".join(lines)
 
 
@@ -100,6 +101,7 @@ def stock_report(arg: str, now: datetime | None = None,
     if disclosure_days:
         items = [it for d in disclosure_days for it in fetch_day(d)]
 
+    mkt = market_condition(fetch_market())
     codes = parse_codes(arg)
     dropped = len(codes) > config.MAX_SCREEN_PER_RUN
     blocks, seen = [], set()
@@ -120,11 +122,14 @@ def stock_report(arg: str, now: datetime | None = None,
             continue
         closes = df.dropna(subset=["Close"])
         data_date = closes.index[-1].date() if len(closes) else None
+        earn = earnings_note(next_earnings_date(code4), today)
         blocks.append(fmt_stock(code4, fetch_name(code4), evaluate(df, now),
-                                data_date, today, disc))
+                                data_date, today, disc, analyze(df), earn, mkt[0]))
     if not blocks:
         blocks.append("銘柄コードが指定されていない（例: --stock 7203）")
     if dropped:
         blocks.append(f"※一度に照会できるのは {config.MAX_SCREEN_PER_RUN} 銘柄まで。超過分は省略した")
-    return "\n\n".join([f"【銘柄状況】{now:%m/%d %H:%M}"] + blocks
-                       + ["※判断材料であり売買の推奨ではない"])
+    head = f"【銘柄状況】{now:%m/%d %H:%M}"
+    if mkt[0]:
+        head += f"\n地合い 日経平均 {mkt[0]}（{mkt[1]}）"
+    return "\n\n".join([head] + blocks + ["※判断材料であり売買の推奨ではない"])
