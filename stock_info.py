@@ -11,7 +11,8 @@ import time
 from datetime import date, datetime
 
 import config
-from chart_context import analyze, context_lines, earnings_note, market_condition, stance, yen
+from chart_context import (analyze, context_lines, earnings_note, market_condition,
+                           room_line, stance, yen)
 from judge import keyword_judge
 from screener import JST, evaluate, fetch_history, fetch_market, next_earnings_date
 from tdnet import fetch_day
@@ -86,10 +87,11 @@ def fmt_stock(code4: str, name: str, s, data_date: date | None = None,
     ]
     if ctx is not None:
         lines += context_lines(ctx)
+        lines.append(room_line(ctx, s.price, s.stop))
         if earn:
             lines.append(f" {earn}")
         lines.append(f" 総合 {stance(ctx, mkt_label)}")
-    return "\n".join(lines)
+    return "\n".join(l for l in lines if l)
 
 
 def stock_report(arg: str, now: datetime | None = None,

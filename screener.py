@@ -6,6 +6,10 @@
   3. 当日出来高 ≥ 20日平均 × VOLUME_RATIO（場中は経過時間で按分）
   4. 前日終値比のギャップ ≤ MAX_GAP_PCT
 
+1 の「現在値 > 25MA」は require_above_ma25=False で外せる（教材スキャン用。
+押し目からの反発は定義上いったん 25MA を割るため、そこを狙う枠では
+25MA > 75MA だけを見る）。
+
 3 は引け後（15:30以降）には課さない。引け後に出た開示の当日出来高は
 「ニュースが出る前」に積み上がった数字で、材料はまだ売買されていない。
 1.5倍を要求すると夜間の監視が構造的に空振りするため、表示だけして
@@ -71,10 +75,14 @@ def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
     return tr.ewm(alpha=1 / n, adjust=False).mean()
 
 
-def evaluate(df: pd.DataFrame, now: datetime, require_volume: bool | None = None) -> Screen:
+def evaluate(df: pd.DataFrame, now: datetime, require_volume: bool | None = None,
+             require_above_ma25: bool = True) -> Screen:
     """ネットワーク不要の純粋な判定ロジック（テスト用に分離）。
 
     require_volume: 出来高条件を課すか。None（既定）は「引け後は課さない」。
+    require_above_ma25: 1 の「現在値 > 25MA」まで課すか。False なら 25MA > 75MA
+        だけを見る。押し目からの反発（教材の追随期）は定義上いったん 25MA を
+        割るので、そこを狙う教材スキャンでは False にする。
     """
     df = df.dropna(subset=["Close"])
     if len(df) < config.MIN_HISTORY:
@@ -108,8 +116,10 @@ def evaluate(df: pd.DataFrame, now: datetime, require_volume: bool | None = None
         if require_volume and s.vol_ratio < config.VOLUME_RATIO:
             s.reasons.append(f"出来高{s.vol_ratio:.1f}倍<{config.VOLUME_RATIO}")
 
-    if not (s.price > s.ma25 > s.ma75):
+    if require_above_ma25 and not (s.price > s.ma25 > s.ma75):
         s.reasons.append("トレンド不成立(現在値>25MA>75MA)")
+    elif not require_above_ma25 and not (s.ma25 > s.ma75):
+        s.reasons.append("トレンド不成立(25MA>75MA)")
     if s.rsi >= config.RSI_MAX:
         s.reasons.append(f"RSI{s.rsi:.0f}≥{config.RSI_MAX}")
     if s.gap_pct > config.MAX_GAP_PCT:

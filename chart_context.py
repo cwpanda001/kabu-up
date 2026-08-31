@@ -216,10 +216,47 @@ def stance_score(ctx: Context, market_label: str = "") -> tuple[int, int]:
     return sum(checks), len(checks)
 
 
-def is_perfect(ctx: Context, market_label: str = "") -> bool:
-    """教材条件が満点か（材料ニュース抜きで通知する条件）。"""
-    n, total = stance_score(ctx, market_label)
-    return total > 0 and n == total
+def scan_ok(ctx: Context, market_label: str = "") -> bool:
+    """教材スキャン（材料ニュース無しで通知する枠）の合否。
+
+    要求するのは「上昇トレンド・追随期・25MA上向き・地合い良好」の4点。
+    上値余地はゲートにせず room_line() で数値を出すだけにする。教材の
+    「追随期＝押し目からの反発」で入る以上、直上の節目までの距離は銘柄ごとに
+    大きく違い、一律のしきい値で切ると通知がほぼ出なくなるため（合成株価
+    3000件では満点を要求すると成立率0.03%＝229銘柄で週0.4件しか出なかった）。
+    上値余地も課したいときは config.SCAN_REQUIRE_ROOM = True にする。
+    """
+    if not ctx.ok:
+        return False
+    checks = [ctx.trend == "上昇", ctx.stage == "追随期", ctx.ma25_up]
+    if config.SCAN_REQUIRE_ROOM:
+        checks.append(ctx.new_high or (ctx.room_pct is not None
+                                       and ctx.room_pct >= config.RESISTANCE_ROOM_PCT))
+    if market_label:
+        checks.append(market_label == "良好")
+    return all(checks)
+
+
+def room_line(ctx: Context, price: float, stop: float) -> str:
+    """上値余地（次の目立つ山＝利確目安までの伸びしろ）と損切りまでの距離。
+
+    上値余地をスキャンのゲートから外した代わりに、円と%とリスクリワード比で
+    出して「その余地で取りに行くか」を自分で判断できるようにする。
+    """
+    if not price:
+        return ""
+    risk_pct = (price - stop) / price * 100 if stop and price > stop else 0.0
+    risk = (f"損切りまで −{risk_pct:.1f}%（−{yen(price - stop)}円）" if risk_pct > 0
+            else "損切りまで −")
+    if ctx.new_high:
+        return f" 上値余地 － ／ {risk}（新高値圏・取得期間内に上値の節目なし）"
+    if ctx.resistance is None or ctx.room_pct is None:
+        return f" 上値余地 不明 ／ {risk}（上に目立つ山が無い）"
+    up = (f"上値余地 +{ctx.room_pct:.1f}%"
+          f"（{yen(ctx.resistance)}円まで {yen(ctx.resistance - price)}円）")
+    if risk_pct <= 0:
+        return f" {up} ／ {risk}"
+    return f" {up} ／ {risk} ／ リスクリワード {ctx.room_pct / risk_pct:.1f}"
 
 
 def stance(ctx: Context, market_label: str = "") -> str:

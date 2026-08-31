@@ -195,23 +195,53 @@ assert s.vol_ratio < config.VOLUME_RATIO                   # 数値は表示用�
 assert evaluate(low_vol, intraday, require_volume=False).passed        # 明示 OFF
 assert not evaluate(low_vol, after, require_volume=True).passed        # 明示 ON
 
-# --- 教材条件の点数（材料ニュース無しで通知する判定） ---
-from chart_context import Context, is_perfect, stance_score
+# --- 教材条件の点数（通知に併記する総合評価） ---
+from chart_context import Context, room_line, scan_ok, stance_score
 
-def ctx_of(trend="上昇", stage="追随期", ma25_up=True, room=10.0, new_high=False):
+def ctx_of(trend="上昇", stage="追随期", ma25_up=True, room=10.0, new_high=False,
+           resistance=1290.0):
     return Context(ok=True, trend=trend, stage=stage, ma25_up=ma25_up,
-                   room_pct=room, new_high=new_high)
+                   room_pct=room, new_high=new_high, resistance=resistance)
 
-assert stance_score(ctx_of(), "良好") == (5, 5) and is_perfect(ctx_of(), "良好")
-assert stance_score(ctx_of(), "") == (4, 4) and is_perfect(ctx_of(), "")   # 地合い不明は数えない
-assert not is_perfect(ctx_of(), "注意")                    # 地合いが良好でなければ満点にならない
-assert not is_perfect(ctx_of(stage="中立"), "良好")
-assert not is_perfect(ctx_of(ma25_up=False), "良好")
-assert not is_perfect(ctx_of(room=3.0), "良好")            # 真上に抵抗線
-assert is_perfect(ctx_of(room=3.0, new_high=True), "良好")  # 新高値圏なら抵抗線なし扱い
-assert not is_perfect(Context(ok=False))                   # 日足不足は満点にしない
+assert stance_score(ctx_of(), "良好") == (5, 5)
+assert stance_score(ctx_of(), "") == (4, 4)                # 地合い不明は項目に数えない
+assert stance_score(ctx_of(room=3.0), "良好") == (4, 5)     # 上値余地だけ未達
 assert stance_score(Context(ok=False)) == (0, 0)
 assert "5/5" in stance(ctx_of(), "良好") and "◎" in stance(ctx_of(), "良好")
+assert "4/5" in stance(ctx_of(room=3.0), "良好")
+
+# --- 教材スキャンのゲート（上値余地は課さない＝D案） ---
+assert scan_ok(ctx_of(), "良好")
+assert scan_ok(ctx_of(room=3.0), "良好")                   # 上値余地が浅くても通す
+assert scan_ok(ctx_of(room=-99.0, resistance=None), "良好")  # 上値抵抗が無くても通す
+assert scan_ok(ctx_of(), "")                               # 地合い不明なら地合いは問わない
+assert not scan_ok(ctx_of(), "注意")                        # 地合いが良好でなければ出さない
+assert not scan_ok(ctx_of(stage="中立"), "良好")             # 追随期は必須
+assert not scan_ok(ctx_of(trend="横ばい"), "良好")
+assert not scan_ok(ctx_of(ma25_up=False), "良好")
+assert not scan_ok(Context(ok=False), "良好")
+config.SCAN_REQUIRE_ROOM = True                            # 課したい人は課せる
+assert not scan_ok(ctx_of(room=3.0), "良好") and scan_ok(ctx_of(room=10.0), "良好")
+config.SCAN_REQUIRE_ROOM = False
+
+# --- 上値余地の表示 ---
+line = room_line(ctx_of(room=4.88), 1230.0, 1190.0)
+assert "上値余地 +4.9%（1,290円まで 60円）" in line
+assert "損切りまで −3.3%（−40円）" in line
+assert "リスクリワード 1.5" in line                          # 4.88 / 3.25
+assert "新高値圏" in room_line(ctx_of(new_high=True), 1230.0, 1190.0)
+assert "上値余地 不明" in room_line(ctx_of(room=None, resistance=None), 1230.0, 1190.0)
+assert "損切りまで −" in room_line(ctx_of(), 1230.0, 1300.0)   # 損切りが現在値より上なら比を出さない
+assert room_line(ctx_of(), 0.0, 0.0) == ""                  # 株価不明なら行を出さない
+
+# --- 「現在値>25MA」を外せる（押し目からの反発を拾うため） ---
+pullback = make_df(today, n=120, trend=1.0, gap=-1.0)
+pullback.loc[pullback.index[-1], "Close"] = float(pullback["Close"].iloc[-30:].mean()) * 0.97
+below = evaluate(pullback, after)
+assert "トレンド不成立(現在値>25MA>75MA)" in below.reasons
+soft = evaluate(pullback, after, require_above_ma25=False)
+assert "トレンド不成立(現在値>25MA>75MA)" not in soft.reasons
+assert soft.price < soft.ma25                              # 25MAを割ったままでも判定できる
 
 # --- 同一銘柄の判定マージ ---
 from main import merge_judge
@@ -266,9 +296,9 @@ state = {"a.pdf": {"d": "2026-08-31", "s": "notified"},
 assert main_module.run(items, intraday, state, dry_run=False)["hits"] == 0
 
 # --- scan_market(): 材料ニュース無しでも教材条件が満点なら通知 ---
-# 満点判定そのものは stance_score/is_perfect で直接検証済みなので、
+# ゲート判定そのものは scan_ok で直接検証済みなので、
 # ここでは配管（出来高条件OFF・データ無しの扱い・クールダウン・本文）を見る。
-main_module.is_perfect = lambda ctx, mkt_label="": True
+main_module.scan_ok = lambda ctx, mkt_label="": True
 main_module.fetch_name = lambda c: "テスト株式会社"
 main_module.load_universe = lambda: ["7203", "6758", "9999"]
 main_module.fetch_history_batch = lambda codes: {
@@ -284,8 +314,9 @@ assert mstats == {"scanned": 3, "nodata": 1, "hits": 1}, mstats
 assert len(sent) == 1
 body = sent[0]
 assert "【教材条件クリア（材料ニュースなし）】" in body
-assert "■ 7203 テスト株式会社" in body and "教材条件を満点で充足" in body
+assert "■ 7203 テスト株式会社" in body and "教材条件クリア（追随期の押し目反発" in body
 assert "損切り目安" in body and "6758" not in body
+assert "上値余地" in body and "リスクリワード" in body       # 余地は数値で出す
 assert state["mkt:7203"] == {"d": "2026-08-31", "s": "market"}
 
 # クールダウン中は再通知しない
@@ -296,9 +327,9 @@ state["mkt:7203"]["d"] = "2026-08-20"
 sent.clear()
 assert main_module.scan_market(after, state, dry_run=False)["hits"] == 1 and len(sent) == 1
 
-# 地合いが良好でなければ満点にならない（is_perfect を素に戻して確認）
+# 地合いが良好でなければ1件も出ない（scan_ok を素に戻して確認）
 import chart_context
-main_module.is_perfect = chart_context.is_perfect
+main_module.scan_ok = chart_context.scan_ok
 main_module.fetch_market = lambda: make_path((36000, 30000, 200))   # 25MA下向き
 state = {}
 assert main_module.scan_market(after, state, dry_run=False)["hits"] == 0

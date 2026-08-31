@@ -21,8 +21,8 @@ import time
 from datetime import date, datetime, timedelta
 
 import config
-from chart_context import (analyze, context_lines, earnings_note, is_perfect, is_trading_day,
-                           market_condition, prev_trading_day, stance, yen)
+from chart_context import (analyze, context_lines, earnings_note, is_trading_day,
+                           market_condition, prev_trading_day, room_line, scan_ok, stance, yen)
 from judge import judge
 from nikkei225 import load_universe
 from notify import send
@@ -96,6 +96,7 @@ def fmt_hit(items: list[Disclosure], v: dict, s, ctx, earn: str,
     lines.append(f" 判定 {label}")
     lines += _chart_lines(s)
     lines += context_lines(ctx)
+    lines.append(room_line(ctx, s.price, s.stop))
     if earn:
         lines.append(f" {earn}")
     lines += [
@@ -103,21 +104,23 @@ def fmt_hit(items: list[Disclosure], v: dict, s, ctx, earn: str,
         f" 損切り目安 {yen(s.stop)}円（−{config.ATR_STOP_MULT:g}ATR）",
     ]
     lines += [f" {it.url}" for it in items if it.url]
-    return "\n".join(lines)
+    return "\n".join(l for l in lines if l)
 
 
 def fmt_market_hit(code4: str, name: str, s, ctx, earn: str, mkt_label: str) -> str:
     """教材スキャンのヒット1銘柄分（材料ニュースは無い）。"""
-    lines = [f"■ {code4} {name}".rstrip(), " 判定 教材条件を満点で充足（材料ニュースなし）"]
+    lines = [f"■ {code4} {name}".rstrip(),
+             " 判定 教材条件クリア（追随期の押し目反発・材料ニュースなし）"]
     lines += _chart_lines(s)
     lines += context_lines(ctx)
+    lines.append(room_line(ctx, s.price, s.stop))
     if earn:
         lines.append(f" {earn}")
     lines += [
         f" 総合 {stance(ctx, mkt_label)}",
         f" 損切り目安 {yen(s.stop)}円（−{config.ATR_STOP_MULT:g}ATR）",
     ]
-    return "\n".join(lines)
+    return "\n".join(l for l in lines if l)
 
 
 def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> dict:
@@ -200,8 +203,11 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> d
 def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = None) -> dict:
     """材料ニュースが無くても、教材条件を満点で満たす銘柄を拾う（引け後の日次スキャン）。
 
-    出来高条件は課さない。材料の出ていない銘柄の出来高が平常なのは当たり前で、
-    1.5倍を要求すると教材条件（押し目反発＝出来高は細る局面）と矛盾するため。
+    通知条件は「上昇トレンド・追随期・25MA上向き・地合い良好」の4点（chart_context.scan_ok）。
+    出来高と「現在値>25MA」は課さない。材料の出ていない銘柄の出来高が平常なのは
+    当たり前だし、教材の追随期＝押し目からの反発は定義上いったん 25MA を割るので、
+    どちらも狙っている場面そのものを弾いてしまう。上値余地はゲートにせず、
+    room_line() で円・%・リスクリワード比を出して判断材料にする。
     RSI・ギャップ・25MA>75MA の高値掴みガードはそのまま効かせる。
     """
     codes = load_universe()
@@ -217,31 +223,36 @@ def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = N
         if df is None:
             nodata += 1
             continue
-        s = evaluate(df, now, require_volume=config.SCAN_REQUIRE_VOLUME)
+        s = evaluate(df, now, require_volume=config.SCAN_REQUIRE_VOLUME,
+                     require_above_ma25=config.SCAN_REQUIRE_ABOVE_MA25)
         if not s.passed:
             continue
         ctx = analyze(df)
-        if not is_perfect(ctx, mkt[0]):
+        if not scan_ok(ctx, mkt[0]):
             continue
         prev = state.get(f"mkt:{code4}")
         if prev and prev.get("d", "") > cooldown:
             print(f"[cool] {code4}: {prev['d']} に通知済みのため見送り")
             continue
         earn = earnings_note(next_earnings_date(code4), now.date())
-        print(f"[MKT]  {code4}: {ctx.stage} gap{s.gap_pct:+.1f}% RSI{s.rsi:.0f}")
+        room = "新高値" if ctx.new_high else (
+            "余地不明" if ctx.room_pct is None else f"余地{ctx.room_pct:+.1f}%")
+        print(f"[MKT]  {code4}: {ctx.stage} {room} gap{s.gap_pct:+.1f}% RSI{s.rsi:.0f}")
         hits.append((code4, fetch_name(code4), s, ctx, earn))
         state[f"mkt:{code4}"] = {"d": now.date().isoformat(), "s": "market"}
 
     if nodata:
         print(f"[scan] 株価データ無し {nodata} 銘柄（コード更新漏れの可能性）")
     if hits:
-        hits.sort(key=lambda h: -h[2].gap_pct)
+        # 上値余地はゲートにしないので、代わりに余地の大きい順に並べる
+        hits.sort(key=lambda h: -(999.0 if h[3].new_high else (h[3].room_pct or -99.0)))
         head = f"【教材条件クリア（材料ニュースなし）】{now:%m/%d %H:%M}"
         if mkt[0]:
             head += f"\n地合い 日経平均 {mkt[0]}（{mkt[1]}）"
         body = [head]
         body += [fmt_market_hit(c, n, s, ctx, earn, mkt[0]) for c, n, s, ctx, earn in hits]
-        body.append("※教材条件のみで抽出。材料ニュースは出ていないので、値動きの理由は各自で確認")
+        body.append("※教材条件のみで抽出。材料ニュースは出ていないので、値動きの理由は各自で確認。\n"
+                    "　上値余地は合否に使っていない（数値を見て取りに行くか判断する）")
         send("\n\n".join(body), dry_run=dry_run)
     return {"scanned": len(codes), "nodata": nodata, "hits": len(hits)}
 
