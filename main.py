@@ -1,4 +1,4 @@
-"""TDnet監視 → キーワード判定 → チャート条件 → 通知
+"""TDnet監視 → キーワード判定 → チャート条件 → 教材判定を併記して通知
 
 使い方:
   python main.py                       # 本番（GitHub Actions から cron 実行）
@@ -15,35 +15,19 @@ import argparse
 import json
 import os
 import time
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
-
-import jpholiday
+from datetime import datetime, timedelta
 
 import config
+from chart_context import (analyze, context_lines, earnings_note, is_trading_day,
+                           market_condition, prev_trading_day, stance, yen)
 from judge import judge
 from notify import send
-from screener import JST, screen
-from stock_info import stock_report, yen
+from screener import JST, evaluate, fetch_history, fetch_market, next_earnings_date
+from stock_info import stock_report
 from tdnet import Disclosure, fetch_day, parse_list
 
 STATE_PATH = "state/seen.json"
 KEEP_DAYS = 3
-
-
-def is_trading_day(d: date) -> bool:
-    if d.weekday() >= 5 or jpholiday.is_holiday(d):
-        return False
-    if (d.month == 12 and d.day == 31) or (d.month == 1 and d.day <= 3):
-        return False
-    return True
-
-
-def prev_trading_day(d: date) -> date:
-    d -= timedelta(days=1)
-    while not is_trading_day(d):
-        d -= timedelta(days=1)
-    return d
 
 
 def load_state() -> dict:
@@ -62,22 +46,29 @@ def save_state(state: dict, today: date) -> None:
         json.dump(state, f, ensure_ascii=False, indent=0)
 
 
-def fmt_hit(item: Disclosure, v: dict, s, today: str) -> str:
+def fmt_hit(item: Disclosure, v: dict, s, ctx, earn: str, mkt_label: str, today: str) -> str:
     label = "／".join(v["labels"])
     if v.get("ai"):
         label += f"（AI: {v['ai'].get('summary', '')}）"
     elif v.get("note"):
         label += f"（{v['note']}）"
     day = "" if item.date == today else f"{item.date[5:].replace('-', '/')} "
-    return "\n".join([
+    lines = [
         f"■ {item.code4} {item.name}",
         f" 開示 {day}{item.time}｜{item.title}",
         f" 判定 {label}",
         f" 株価 {yen(s.price)}円（前日比 {s.gap_pct:+.1f}%）→ {s.entry_label}",
         f" 25MA {yen(s.ma25)} ／ 75MA {yen(s.ma75)} ／ RSI {s.rsi:.0f} ／ 出来高 {s.vol_ratio:.1f}倍",
+    ]
+    lines += context_lines(ctx)
+    if earn:
+        lines.append(f" {earn}")
+    lines += [
+        f" 総合 {stance(ctx, mkt_label)}",
         f" 損切り目安 {yen(s.stop)}円（−{config.ATR_STOP_MULT:g}ATR）",
         f" {item.url}",
-    ])
+    ]
+    return "\n".join(lines)
 
 
 def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> int:
@@ -85,6 +76,12 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> i
     hits, screened = [], 0
     # 前営業日分は 15:00 以降（引け後開示）のみ持ち越して再判定する
     targets = [it for it in items if it.date == today or it.time >= "15:00"]
+
+    mkt = ("", "")
+    if targets:
+        mkt = market_condition(fetch_market())
+        if mkt[0]:
+            print(f"地合い 日経平均 {mkt[0]}（{mkt[1]}）")
 
     for it in targets:
         st = state.get(it.id)
@@ -100,25 +97,37 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> i
             state[it.id] = {"d": it.date, "s": "pending", "v": v}
             continue
         screened += 1
-        s = screen(it.code4, now)
+        df = fetch_history(it.code4)
         time.sleep(1.0)  # yfinance レート制限対策
-        if s is None:
+        if df is None:
             print(f"[skip] {it.code4} {it.name}: 株価データ無し（ETF/REIT等）")
             state[it.id] = {"d": it.date, "s": "skipped"}
             continue
+        s = evaluate(df, now)
 
-        if s.passed:
-            print(f"[HIT]  {it.code4} {it.name}: {v['labels']} 出来高{s.vol_ratio:.1f}倍 gap{s.gap_pct:+.1f}%")
-            hits.append((it, v, s))
-            state[it.id] = {"d": it.date, "s": "notified", "v": v}
-        else:
+        if not s.passed:
             print(f"[pend] {it.code4} {it.name}: {v['labels']} / {', '.join(s.reasons)}")
             state[it.id] = {"d": it.date, "s": "pending", "v": v}
+            continue
+        if config.MARKET_FILTER_HARD and mkt[0] == "悪化":
+            print(f"[hold] {it.code4} {it.name}: 地合い悪化のため通知保留（{mkt[1]}）")
+            state[it.id] = {"d": it.date, "s": "pending", "v": v}
+            continue
+
+        ctx = analyze(df)
+        earn = earnings_note(next_earnings_date(it.code4), now.date())
+        print(f"[HIT]  {it.code4} {it.name}: {v['labels']} 出来高{s.vol_ratio:.1f}倍 "
+              f"gap{s.gap_pct:+.1f}% {ctx.stage}")
+        hits.append((it, v, s, ctx, earn))
+        state[it.id] = {"d": it.date, "s": "notified", "v": v}
 
     if hits:
         hits.sort(key=lambda h: (-h[1]["score"], -h[2].vol_ratio))
-        body = [f"【材料×チャート一致】{now:%m/%d %H:%M}"]
-        body += [fmt_hit(*h, today) for h in hits]
+        head = f"【材料×チャート一致】{now:%m/%d %H:%M}"
+        if mkt[0]:
+            head += f"\n地合い 日経平均 {mkt[0]}（{mkt[1]}）"
+        body = [head]
+        body += [fmt_hit(it, v, s, ctx, earn, mkt[0], today) for it, v, s, ctx, earn in hits]
         if any(h[2].after_close for h in hits):
             body.append("※引け後の株価（終値）で判定。急ぐ場合はPTS（夜間取引）の板を確認して対応可。\n"
                         "　翌営業日に持ち越す場合は寄付きのギャップを再確認してから判断")

@@ -115,13 +115,39 @@ def fetch_history(code4: str, retries: int = 2):
     import yfinance as yf
     for i in range(retries + 1):
         try:
-            df = yf.Ticker(f"{code4}.T").history(period="1y", interval="1d", auto_adjust=False)
+            df = yf.Ticker(f"{code4}.T").history(period=config.HISTORY_PERIOD,
+                                                 interval="1d", auto_adjust=False)
             if df is not None and len(df):
                 return df
         except Exception as e:
             print(f"[screener] {code4} fetch error: {e}")
         time.sleep(2 * (i + 1))
     return None
+
+
+def fetch_market():
+    """地合い判定用の指数日足。失敗しても None で続行（地合い行が出ないだけ）。"""
+    import yfinance as yf
+    try:
+        df = yf.Ticker(config.MARKET_INDEX).history(period="1y", interval="1d", auto_adjust=False)
+        return df if df is not None and len(df) else None
+    except Exception as e:
+        print(f"[screener] market fetch error: {e}")
+        return None
+
+
+def next_earnings_date(code4: str):
+    """次回の決算発表日（date）。yfinance のベストエフォット情報なので取れなければ None。"""
+    import yfinance as yf
+    try:
+        ed = yf.Ticker(f"{code4}.T").get_earnings_dates(limit=8)
+        if ed is None or not len(ed):
+            return None
+        today = datetime.now(JST).date()
+        future = [ts.date() for ts in ed.index if ts.date() >= today]
+        return min(future) if future else None
+    except Exception:
+        return None
 
 
 def screen(code4: str, now: datetime | None = None):
