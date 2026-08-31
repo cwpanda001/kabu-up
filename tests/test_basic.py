@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo
 import numpy as np, pandas as pd
 
 import config
+import main as main_module   # import時エラー（型注釈のNameError等）をCIで検出する
+import notify as notify_module
 from tdnet import parse_list
 from judge import keyword_judge, pdf_direction
 from screener import evaluate, session_fraction
