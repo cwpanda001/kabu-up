@@ -5,6 +5,11 @@
   2. RSI14 < RSI_MAX（高値掴み回避）
   3. 当日出来高 ≥ 20日平均 × VOLUME_RATIO（場中は経過時間で按分）
   4. 前日終値比のギャップ ≤ MAX_GAP_PCT
+
+3 は引け後（15:30以降）には課さない。引け後に出た開示の当日出来高は
+「ニュースが出る前」に積み上がった数字で、材料はまだ売買されていない。
+1.5倍を要求すると夜間の監視が構造的に空振りするため、表示だけして
+合否からは外す（require_volume で明示的に上書きもできる）。
 """
 import time
 from dataclasses import dataclass, field
@@ -66,8 +71,11 @@ def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
     return tr.ewm(alpha=1 / n, adjust=False).mean()
 
 
-def evaluate(df: pd.DataFrame, now: datetime) -> Screen:
-    """ネットワーク不要の純粋な判定ロジック（テスト用に分離）。"""
+def evaluate(df: pd.DataFrame, now: datetime, require_volume: bool | None = None) -> Screen:
+    """ネットワーク不要の純粋な判定ロジック（テスト用に分離）。
+
+    require_volume: 出来高条件を課すか。None（既定）は「引け後は課さない」。
+    """
     df = df.dropna(subset=["Close"])
     if len(df) < config.MIN_HISTORY:
         return Screen(False, [f"日足不足({len(df)}本)"])
@@ -86,6 +94,8 @@ def evaluate(df: pd.DataFrame, now: datetime) -> Screen:
     s.atr = float(atr(df).iloc[-1])
     s.stop = s.price - config.ATR_STOP_MULT * s.atr
     s.after_close = now.time() >= dtime(15, 30)
+    if require_volume is None:
+        require_volume = not s.after_close
 
     if not is_today:
         s.reasons.append("当日株価未取得")
@@ -95,7 +105,7 @@ def evaluate(df: pd.DataFrame, now: datetime) -> Screen:
         frac = max(session_fraction(now), 0.15)      # 寄付き直後はノイズが大きいので最低15%扱い
         expected = avg20 * frac if avg20 > 0 else 0
         s.vol_ratio = float(vol.iloc[-1]) / expected if expected else 0.0
-        if s.vol_ratio < config.VOLUME_RATIO:
+        if require_volume and s.vol_ratio < config.VOLUME_RATIO:
             s.reasons.append(f"出来高{s.vol_ratio:.1f}倍<{config.VOLUME_RATIO}")
 
     if not (s.price > s.ma25 > s.ma75):
@@ -123,6 +133,44 @@ def fetch_history(code4: str, retries: int = 2):
             print(f"[screener] {code4} fetch error: {e}")
         time.sleep(2 * (i + 1))
     return None
+
+
+def _slice_batch(data, ticker: str):
+    """yf.download の戻りから1銘柄分を切り出す。取れなければ None。"""
+    if data is None or not len(data):
+        return None
+    try:
+        df = data[ticker] if isinstance(data.columns, pd.MultiIndex) else data
+        df = df.dropna(subset=["Close"])
+    except (KeyError, IndexError):
+        return None
+    return df if len(df) else None
+
+
+def fetch_history_batch(code4s: list[str], chunk: int | None = None) -> dict:
+    """複数銘柄の日足をまとめて取る。{code4: DataFrame or None}。
+
+    1銘柄ずつ叩くと 225 銘柄で 4 分以上かかるため、yf.download でまとめて取る。
+    チャンク単位で失敗しても、その分が None になるだけで全体は続行する。
+    """
+    import yfinance as yf
+    chunk = chunk or config.BATCH_CHUNK
+    out: dict = {}
+    for i in range(0, len(code4s), chunk):
+        part = code4s[i:i + chunk]
+        tickers = [f"{c}.T" for c in part]
+        data = None
+        try:
+            data = yf.download(tickers, period=config.HISTORY_PERIOD, interval="1d",
+                               auto_adjust=False, group_by="ticker", threads=True,
+                               progress=False)
+        except Exception as e:
+            print(f"[screener] batch fetch error {part[0]}-{part[-1]}: {e}")
+        for c, t in zip(part, tickers):
+            out[c] = _slice_batch(data, t)
+        if i + chunk < len(code4s):
+            time.sleep(1.0)   # yfinance レート制限対策
+    return out
 
 
 def fetch_market():

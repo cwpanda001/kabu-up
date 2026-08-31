@@ -198,10 +198,13 @@ def earnings_note(edate: date | None, today: date) -> str:
     return line
 
 
-def stance(ctx: Context, market_label: str = "") -> str:
-    """教材条件の充足数から総合評価をつくる（判断材料。売買推奨ではない）。"""
+def stance_score(ctx: Context, market_label: str = "") -> tuple[int, int]:
+    """教材条件の (充足数, 項目数)。市場ラベルが空なら地合いの項目は数えない。
+
+    判定不能（日足不足）は (0, 0) を返す。満点判定は n == total > 0 で見る。
+    """
     if not ctx.ok:
-        return "判定不能（日足データ不足）"
+        return 0, 0
     checks = [
         ctx.trend == "上昇",
         ctx.stage == "追随期",
@@ -210,7 +213,20 @@ def stance(ctx: Context, market_label: str = "") -> str:
     ]
     if market_label:
         checks.append(market_label == "良好")
-    n, total = sum(checks), len(checks)
+    return sum(checks), len(checks)
+
+
+def is_perfect(ctx: Context, market_label: str = "") -> bool:
+    """教材条件が満点か（材料ニュース抜きで通知する条件）。"""
+    n, total = stance_score(ctx, market_label)
+    return total > 0 and n == total
+
+
+def stance(ctx: Context, market_label: str = "") -> str:
+    """教材条件の充足数から総合評価をつくる（判断材料。売買推奨ではない）。"""
+    if not ctx.ok:
+        return "判定不能（日足データ不足）"
+    n, total = stance_score(ctx, market_label)
     mark = ("◎" if n == total else "○" if n == total - 1
             else "△" if n == total - 2 else "▲")
     label = {"◎": "追い風", "○": "おおむね良好", "△": "条件不足", "▲": "見送り寄り"}[mark]
