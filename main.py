@@ -120,7 +120,8 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> i
         body = [f"【材料×チャート一致】{now:%m/%d %H:%M}"]
         body += [fmt_hit(*h, today) for h in hits]
         if any(h[2].after_close for h in hits):
-            body.append("※引け後の株価で判定。翌営業日の寄付きで再確認してから判断")
+            body.append("※引け後の株価（終値）で判定。急ぐ場合はPTS（夜間取引）の板を確認して対応可。\n"
+                        "　翌営業日に持ち越す場合は寄付きのギャップを再確認してから判断")
         send("\n\n".join(body), dry_run=dry_run)
     return len(hits)
 
