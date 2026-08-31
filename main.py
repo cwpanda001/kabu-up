@@ -15,7 +15,7 @@ import argparse
 import json
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import config
 from chart_context import (analyze, context_lines, earnings_note, is_trading_day,
