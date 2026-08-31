@@ -11,6 +11,10 @@ on:
     # 夜間の開示（19時台なども多い）を当夜のうちに通知し、PTS（夜間取引）で
     # 対応する選択肢を残すため、ナイトタイムセッションの間はカバーする
     - cron: "3,33 7-14 * * 1-5"
+    # UTC 7:35 = JST 16:35。1日1回の引け後実行。ここだけ教材条件スキャン
+    # （--scan-market）と日次サマリ（--summary）を足す。日足が確定していないと
+    # 意味が無いので場中には回さない。DAILY_CRON と同じ文字列にしておくこと。
+    - cron: "35 7 * * 1-5"
   workflow_dispatch:
     inputs:
       stock_codes:
@@ -25,6 +29,10 @@ on:
         description: "休場日でも通常実行する"
         type: boolean
         default: false
+      daily:
+        description: "引け後の日次処理（教材条件スキャン＋日次サマリ）も実行する"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -36,7 +44,8 @@ concurrency:
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 日次実行では日経225を1銘柄ずつではなくまとめて取るが、それでも数分かかる
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,12 +70,32 @@ jobs:
           NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           STOCK_CODES: ${{ inputs.stock_codes }}
+          TEST_NOTIFY: ${{ inputs.test_notify }}
+          FORCE: ${{ inputs.force }}
+          DAILY: ${{ inputs.daily }}
+          SCHEDULE: ${{ github.event.schedule }}
+          DAILY_CRON: "35 7 * * 1-5"
         run: |
+          # inputs.* は schedule 実行では空、API 経由の dispatch では "true"/"false" の
+          # 文字列で届く。${{ inputs.x && 'a' || 'b' }} は空でない文字列を真と見なすので
+          # "false" でも 'a' 側になってしまう。値はそのまま env に渡し、bash で比較する。
           if [ -n "${STOCK_CODES}" ]; then
             python main.py --stock "${STOCK_CODES}"
-          else
-            python main.py ${{ inputs.test_notify && '--test-notify' || '' }} ${{ inputs.force && '--force' || '' }}
+            exit 0
           fi
+          if [ "${TEST_NOTIFY}" = "true" ]; then
+            python main.py --test-notify
+            exit 0
+          fi
+          opts=""
+          if [ "${FORCE}" = "true" ]; then
+            opts="${opts} --force"
+          fi
+          if [ "${DAILY}" = "true" ] || [ "${SCHEDULE}" = "${DAILY_CRON}" ]; then
+            opts="${opts} --scan-market --summary"
+          fi
+          echo "python main.py${opts}"
+          python main.py ${opts}
 
       - name: Save state
         run: |
