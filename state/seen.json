@@ -3606,7 +3606,7 @@
 },
 "c": "7066",
 "n": "Ｇ－ピアズ",
-"r": "トレンド不成立(現在値>25MA>75MA)"
+"r": "当日株価未取得, トレンド不成立(現在値>25MA>75MA)"
 },
 "140120260901530018.pdf": {
 "d": "2026-09-02",
@@ -3759,7 +3759,7 @@
 },
 "c": "6996",
 "n": "ニチコン",
-"r": "トレンド不成立(現在値>25MA>75MA)"
+"r": "当日株価未取得, トレンド不成立(現在値>25MA>75MA)"
 },
 "140120260901530234.pdf": {
 "d": "2026-09-02",
@@ -3815,6 +3815,14 @@
 },
 "140120260819523266.pdf": {
 "d": "2026-09-02",
+"s": "skipped"
+},
+"20260903-Copyright © Tokyo Stock Exchange, Inc. All rights reserved.-Copyright © Tokyo Stock Exchange, Inc. All rights reserved.-0": {
+"d": "2026-09-03",
+"s": "skipped"
+},
+"20260903--Copyright © Tokyo Stock Exchange, Inc. All rights reserved.-5623917881910413662": {
+"d": "2026-09-03",
 "s": "skipped"
 }
 }
