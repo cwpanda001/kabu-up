@@ -1,5 +1,5 @@
 """ネットワーク不要のテスト。  python tests/test_basic.py"""
-import sys, os
+import sys, os, re
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -19,6 +19,46 @@ items = parse_list(open("sample/tdnet_sample.html", encoding="utf-8").read(), da
 assert len(items) == 6, len(items)
 assert items[0].code4 == "7203" and items[0].url.endswith("140120260830500001.pdf")
 assert items[0].id == "140120260830500001.pdf"
+
+# 開示ではない行（フッターの著作権表示など）を取り込まない。
+# サンプル末尾に実物と同じ形のフッター行を2つ置いてある（td は4つ以上あるので
+# 行数だけでは弾けず、以前は state/seen.json にゴミとして溜まっていた）
+assert not any("Copyright" in (it.id + it.code + it.name + it.time) for it in items)
+assert all(re.fullmatch(r"[0-9]{1,2}:[0-9]{2}", it.time) for it in items), [it.time for it in items]
+assert all(re.fullmatch(r"[0-9][0-9A-Za-z]{3}[0-9]?", it.code) for it in items), [it.code for it in items]
+
+def one_row(time_cell, code_cell, title_cell='<a href="x.pdf">お知らせ</a>'):
+    return parse_list(
+        f'<table id="main-list-table"><tr>'
+        f'<td class="kjTime">{time_cell}</td><td class="kjCode">{code_cell}</td>'
+        f'<td class="kjName">テスト</td><td class="kjTitle">{title_cell}</td>'
+        f'</tr></table>', date(2026, 8, 30))
+
+assert len(one_row("10:00", "72030")) == 1
+assert len(one_row("9:05", "130A0")) == 1              # 英字入りの新方式コード・1桁時刻
+assert len(one_row("10:00", "7203")) == 1              # 4桁コードの一覧も受ける
+assert one_row("１０:００", "72030") == []              # 全角数字（半角に限定している）
+assert one_row("Copyright © Tokyo Stock Exchange, Inc.", "72030") == []   # フッターの著作権表示
+assert one_row("10:00", "東証プライム") == []           # コードの形が違う行は落とす
+assert one_row("10:00", "72030", "<a href=''></a>") == []   # タイトル空の行は落とす
+
+# PDFリンクが無い行のIDはプロセスをまたいで安定していること。
+# 以前は abs(hash(title)) を使っており、Python の文字列ハッシュは実行ごとに
+# ランダム化されるため、同じ行が毎回別IDになって state に積み上がっていた
+import hashlib
+import subprocess
+no_pdf = one_row("10:00", "72030", "お知らせ")
+assert len(no_pdf) == 1 and not no_pdf[0].url
+digest = hashlib.sha1("お知らせ".encode()).hexdigest()[:12]
+assert no_pdf[0].id == f"20260830-72030-10:00-{digest}", no_pdf[0].id
+other = subprocess.run(
+    [sys.executable, "-c",
+     "import sys; sys.path.insert(0, '.');"
+     "from datetime import date; from tdnet import make_id;"
+     "print(make_id(date(2026, 8, 30), '72030', '10:00', 'お知らせ'))"],
+    capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    env={**os.environ, "PYTHONHASHSEED": "random"})
+assert other.stdout.strip() == no_pdf[0].id, (other.stdout, other.stderr)
 
 # --- キーワード判定 ---
 r = {it.code4: keyword_judge(it.title) for it in items}
