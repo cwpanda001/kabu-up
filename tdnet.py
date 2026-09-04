@@ -3,6 +3,7 @@
 一覧URL: https://www.release.tdnet.info/inbs/I_list_{page:03d}_{YYYYMMDD}.html
 公式APIは無いのでHTMLを読む。マークアップが変わったら parse_list() を直す。
 """
+import hashlib
 import os
 import re
 import time
@@ -14,6 +15,15 @@ from bs4 import BeautifulSoup
 
 BASE = "https://www.release.tdnet.info/inbs/"
 HEADERS = {"User-Agent": "Mozilla/5.0 (tdnet-watch; personal use)"}
+
+# 開示行かどうかの判定。一覧ページの末尾には「Copyright © Tokyo Stock Exchange…」の
+# フッター行があり、これも td が4つ以上あるので行数だけでは弾けない。kj* クラスが
+# 無いと _cell() が位置で拾ってしまい、時刻やコードが著作権表示のまま開示として
+# 取り込まれていた（state/seen.json にゴミが溜まる原因）。開示行なら必ず満たす形
+# ——時刻が HH:MM、コードが4〜5文字の銘柄コード——を積極的に確認して選別する。
+# \d は Unicode 対応で全角数字にも一致するため、半角に限定して [0-9] と書く
+TIME_RE = re.compile(r"^[0-9]{1,2}:[0-9]{2}$")
+CODE_RE = re.compile(r"^[0-9][0-9A-Za-z]{3}[0-9]?$")
 
 
 @dataclass
@@ -49,12 +59,29 @@ def _cell(tr, cls, idx):
     return td
 
 
+def _text(td) -> str:
+    """セルの表示文字列。全角空白・ノーブレークスペースも空白として畳む。"""
+    return re.sub(r"\s+", " ", td.get_text(" ", strip=True)).strip()
+
+
+def make_id(d: date, code: str, tm: str, title: str) -> str:
+    """PDFリンクが無い行のフォールバックID。
+
+    以前は abs(hash(title)) を使っていたが、Python の文字列ハッシュは
+    PYTHONHASHSEED でプロセスごとにランダム化されるため、同じ行が実行のたびに
+    別IDになり state/seen.json に積み上がっていた。プロセスをまたいでも同じ値に
+    なる SHA-1 に変える。
+    """
+    digest = hashlib.sha1(title.encode("utf-8")).hexdigest()[:12]
+    return f"{d:%Y%m%d}-{code}-{tm}-{digest}"
+
+
 def parse_list(html: str, d: date) -> list[Disclosure]:
     soup = BeautifulSoup(html, "html.parser")
     table = soup.find("table", id="main-list-table") or soup.find("table")
     if table is None:
         return []
-    out = []
+    out, dropped = [], 0
     for tr in table.find_all("tr"):
         if len(tr.find_all("td")) < 4:
             continue
@@ -62,18 +89,27 @@ def parse_list(html: str, d: date) -> list[Disclosure]:
                        _cell(tr, "kjName", 2), _cell(tr, "kjTitle", 3))
         if not (t and c and n and ti):
             continue
+        tm, code = _text(t), _text(c)
+        if not (TIME_RE.match(tm) and CODE_RE.match(code)):
+            dropped += 1        # フッター行・ページャ行など、開示ではない行
+            continue
         a = ti.find("a")
         href = a["href"].strip() if a and a.has_attr("href") else ""
-        title = (a.get_text(" ", strip=True) if a else ti.get_text(" ", strip=True))
-        title = re.sub(r"\s+", " ", title)
-        code = c.get_text(strip=True)
-        tm = t.get_text(strip=True)
-        did = os.path.basename(href) or f"{d:%Y%m%d}-{code}-{tm}-{abs(hash(title))}"
+        title = _text(a) if a else _text(ti)
+        if not title:
+            dropped += 1
+            continue
+        did = os.path.basename(href) or make_id(d, code, tm, title)
         out.append(Disclosure(
             id=did, date=d.isoformat(), time=tm, code=code,
-            name=n.get_text(strip=True), title=title,
+            name=_text(n), title=title,
             url=(href if href.startswith("http") else BASE + href) if href else "",
         ))
+    # 開示行が1件も取れずに落とした行だけがある = マークアップ変更の可能性。
+    # フッターを黙って捨てるだけのとき（通常）は何も出さない。
+    if dropped and not out:
+        print(f"[tdnet] {d} の一覧で開示行を1件も認識できなかった"
+              f"（{dropped}行を非開示として除外）。マークアップ変更の可能性")
     return out
 
 
