@@ -43,6 +43,8 @@ class Screen:
     stop: float = 0.0
     entry_label: str = ""
     after_close: bool = False
+    day_high: float = 0.0   # 当日高値（当日の足が無ければ 0）
+    day_low: float = 0.0    # 当日安値（〃。急落検知の戻り率・損切り目安に使う）
 
 
 def session_fraction(now: datetime) -> float:
@@ -73,6 +75,17 @@ def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
     pc = df["Close"].shift(1)
     tr = pd.concat([df["High"] - df["Low"], (df["High"] - pc).abs(), (df["Low"] - pc).abs()], axis=1).max(axis=1)
     return tr.ewm(alpha=1 / n, adjust=False).mean()
+
+
+def bounce_pct(price: float, prev_close: float, low: float) -> float | None:
+    """当日安値からの戻り率%。下げ幅（前日終値−安値）のうち何割を戻したか。
+
+    前日終値を割っていない日（安値 ≥ 前日終値）は「下げていない」ので None。
+    0% = 安値に張り付いたまま（反発未確認）、100% = 前日終値まで全戻し。
+    """
+    if not prev_close or not low or low >= prev_close:
+        return None
+    return max(0.0, min(100.0, (price - low) / (prev_close - low) * 100))
 
 
 def evaluate(df: pd.DataFrame, now: datetime, require_volume: bool | None = None,
@@ -109,6 +122,9 @@ def evaluate(df: pd.DataFrame, now: datetime, require_volume: bool | None = None
         s.reasons.append("当日株価未取得")
         s.vol_ratio = 0.0
     else:
+        hi, lo = df["High"].iloc[-1], df["Low"].iloc[-1]
+        s.day_high = float(hi) if hi == hi else 0.0   # NaN ガード
+        s.day_low = float(lo) if lo == lo else 0.0
         avg20 = float(vol.iloc[-21:-1].mean())
         frac = max(session_fraction(now), 0.15)      # 寄付き直後はノイズが大きいので最低15%扱い
         expected = avg20 * frac if avg20 > 0 else 0
@@ -131,11 +147,12 @@ def evaluate(df: pd.DataFrame, now: datetime, require_volume: bool | None = None
     return s
 
 
-def fetch_history(code4: str, retries: int = 2):
+def fetch_history(code4: str, retries: int = 2, period: str | None = None):
+    """1銘柄の日足。period 省略時は config.HISTORY_PERIOD（5年）。"""
     import yfinance as yf
     for i in range(retries + 1):
         try:
-            df = yf.Ticker(f"{code4}.T").history(period=config.HISTORY_PERIOD,
+            df = yf.Ticker(f"{code4}.T").history(period=period or config.HISTORY_PERIOD,
                                                  interval="1d", auto_adjust=False)
             if df is not None and len(df):
                 return df
@@ -157,21 +174,25 @@ def _slice_batch(data, ticker: str):
     return df if len(df) else None
 
 
-def fetch_history_batch(code4s: list[str], chunk: int | None = None) -> dict:
+def fetch_history_batch(code4s: list[str], chunk: int | None = None,
+                        period: str | None = None) -> dict:
     """複数銘柄の日足をまとめて取る。{code4: DataFrame or None}。
 
     1銘柄ずつ叩くと 225 銘柄で 4 分以上かかるため、yf.download でまとめて取る。
     チャンク単位で失敗しても、その分が None になるだけで全体は続行する。
+    period 省略時は config.HISTORY_PERIOD（5年）。場中に15分おきで回す急落検知は
+    短い期間（config.DIP_HISTORY_PERIOD）を渡して転送量を抑える。
     """
     import yfinance as yf
     chunk = chunk or config.BATCH_CHUNK
+    period = period or config.HISTORY_PERIOD
     out: dict = {}
     for i in range(0, len(code4s), chunk):
         part = code4s[i:i + chunk]
         tickers = [f"{c}.T" for c in part]
         data = None
         try:
-            data = yf.download(tickers, period=config.HISTORY_PERIOD, interval="1d",
+            data = yf.download(tickers, period=period, interval="1d",
                                auto_adjust=False, group_by="ticker", threads=True,
                                progress=False)
         except Exception as e:

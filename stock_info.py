@@ -14,7 +14,7 @@ import config
 from chart_context import (analyze, context_lines, earnings_note, market_condition,
                            room_line, stance, yen)
 from judge import keyword_judge
-from screener import JST, evaluate, fetch_history, fetch_market, next_earnings_date
+from screener import JST, bounce_pct, evaluate, fetch_history, fetch_market, next_earnings_date
 from tdnet import fetch_day
 
 
@@ -63,6 +63,16 @@ def _disc_lines(code4: str, items: list | None, today_iso: str) -> list[str]:
     return out
 
 
+def _day_range_line(s) -> str:
+    """当日の高値・安値と、安値からの戻り率（急落検知と同じ見方を手動照会にも出す）。"""
+    if not s.day_low or not s.prev_close:
+        return ""
+    b = bounce_pct(s.price, s.prev_close, s.day_low)
+    bounce = f"{b:.0f}%" if b is not None else "－（前日終値を割っていない）"
+    return (f" 当日 高値 {yen(s.day_high)} ／ 安値 {yen(s.day_low)}"
+            f"（前日比 {(s.day_low / s.prev_close - 1) * 100:+.1f}%）／ 安値からの戻り率 {bounce}")
+
+
 def fmt_stock(code4: str, name: str, s, data_date: date | None = None,
               today: date | None = None, disc_lines: list[str] | None = None,
               ctx=None, earn: str = "", mkt_label: str = "") -> str:
@@ -79,6 +89,7 @@ def fmt_stock(code4: str, name: str, s, data_date: date | None = None,
     note = "" if is_today or data_date is None else f"（{data_date:%m/%d}終値）"
     lines += [
         f" 株価 {yen(s.price)}円{note}（前日比 {s.gap_pct:+.1f}%）",
+        _day_range_line(s) if is_today else "",
         f" トレンド {'上昇（現在値>25MA>75MA）' if s.price > s.ma25 > s.ma75 else '上昇トレンド不成立'}",
         f" 25MA {yen(s.ma25)} ／ 75MA {yen(s.ma75)} ／ RSI {s.rsi:.0f} ／ 出来高 "
         + (f"{s.vol_ratio:.1f}倍" if is_today else "-"),

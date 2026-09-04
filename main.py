@@ -8,21 +8,25 @@
   python main.py --force               # 休場日でも実行
   python main.py --stock 7203          # 銘柄コードを指定して現在状況を通知
   python main.py --scan-market         # 材料ニュース無しでも教材条件が満点の銘柄を通知
+  python main.py --dip-scan            # 悪材料なし／一過性悪材料の急落を通知（場中の毎回実行に同居）
   python main.py --summary             # その実行の結果を日次サマリとして通知
 
 状態は state/seen.json に持つ（開示IDごとに notified / pending / skipped）。
 pending = 材料はポジティブだがチャート条件が未達。同日中（引け後開示は翌営業日中）は毎回再判定する。
 mkt:銘柄コード = 教材スキャンで通知済み（SCAN_COOLDOWN_DAYS のあいだ再通知しない）。
+dip:銘柄コード = 急落検知で通知済み（DIP_COOLDOWN_DAYS のあいだ再通知しない）。
 """
 import argparse
 import json
 import os
 import time
 from datetime import date, datetime, timedelta
+from datetime import time as dtime
 
 import config
 from chart_context import (analyze, context_lines, earnings_note, is_trading_day,
                            market_condition, prev_trading_day, room_line, scan_ok, stance, yen)
+from dip import dip_scan
 from judge import judge
 from nikkei225 import load_universe
 from notify import send
@@ -32,8 +36,10 @@ from stock_info import fetch_name, stock_report
 from tdnet import Disclosure, fetch_day, parse_list
 
 STATE_PATH = "state/seen.json"
-# 教材スキャンのクールダウン判定に state を使うので、保持期間はそれより短くしない
-KEEP_DAYS = max(3, config.SCAN_COOLDOWN_DAYS)
+# 教材スキャン・急落検知のクールダウン判定に state を使うので、保持期間はそれより短くしない
+KEEP_DAYS = max(3, config.SCAN_COOLDOWN_DAYS, config.DIP_COOLDOWN_DAYS)
+# 急落検知は場中の枠。これ以降の実行では回さない（引けの判定は 16:35 の日次実行が --scan-market と一緒に行う）
+DIP_SCAN_UNTIL = dtime(16, 0)
 
 
 def load_state() -> dict:
@@ -200,7 +206,8 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> d
     return {"targets": len(targets), "hits": len(hits), "mkt": mkt}
 
 
-def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = None) -> dict:
+def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = None,
+                frames: dict | None = None) -> dict:
     """材料ニュースが無くても、教材条件を満点で満たす銘柄を拾う（引け後の日次スキャン）。
 
     通知条件は「上昇トレンド・追随期・25MA上向き・地合い良好」の4点（chart_context.scan_ok）。
@@ -209,6 +216,7 @@ def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = N
     どちらも狙っている場面そのものを弾いてしまう。上値余地はゲートにせず、
     room_line() で円・%・リスクリワード比を出して判断材料にする。
     RSI・ギャップ・25MA>75MA の高値掴みガードはそのまま効かせる。
+    frames（{code4: 日足}）を渡せば取り直さない（急落検知と日足を共有するため）。
     """
     codes = load_universe()
     if not mkt or not mkt[0]:          # run() で取れていればそれを使い回す
@@ -216,7 +224,8 @@ def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = N
     print(f"教材スキャン 対象{len(codes)}銘柄 / 地合い {mkt[0] or '判定不能'}")
     cooldown = (now.date() - timedelta(days=config.SCAN_COOLDOWN_DAYS)).isoformat()
 
-    frames = fetch_history_batch(codes)
+    if frames is None:
+        frames = fetch_history_batch(codes)
     hits, nodata = [], 0
     for code4 in codes:
         df = frames.get(code4)
@@ -257,10 +266,11 @@ def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = N
     return {"scanned": len(codes), "nodata": nodata, "hits": len(hits)}
 
 
-def fmt_summary(now: datetime, state: dict, tdnet: dict, market: dict | None) -> str:
+def fmt_summary(now: datetime, state: dict, tdnet: dict, market: dict | None,
+                dip: dict | None = None) -> str:
     """その日の稼働結果。0件でも送るので「動いているのか」が分かる。"""
     today = now.date().isoformat()
-    mine = [v for v in state.values() if v.get("s") != "market"]
+    mine = [v for v in state.values() if v.get("s") not in ("market", "dip")]
     notified = sum(1 for v in mine if v.get("d") == today and v.get("s") == "notified")
     pend = [v for v in mine if v.get("s") == "pending"]
     pend_today = [v for v in pend if v.get("d") == today]
@@ -276,6 +286,16 @@ def fmt_summary(now: datetime, state: dict, tdnet: dict, market: dict | None) ->
     if market is not None:
         extra = f"・株価データ無し {market['nodata']}銘柄" if market["nodata"] else ""
         lines.append(f"教材スキャン 対象 {market['scanned']}銘柄{extra} → 通知 {market['hits']}件")
+    if dip is not None:
+        # 場中の各実行で通知した分は state に残るので、日次サマリでは1日ぶんを合算して出す
+        codes = sorted(k[4:] for k, v in state.items()
+                       if k.startswith("dip:") and v.get("d") == today)
+        line = f"急落検知 本日 {len(codes)}件"
+        if codes:
+            line += f"（{', '.join(codes)}）"
+        if dip.get("idx") is None:
+            line += "・この実行は日経平均の当日値なしで判定不能"
+        lines.append(line)
 
     if pend:
         lines.append("")
@@ -303,6 +323,8 @@ def main() -> None:
                     help="銘柄コードを指定して現在状況を通知して終了（カンマ区切りで複数可。例: 7203,6758）")
     ap.add_argument("--scan-market", action="store_true",
                     help="材料ニュース無しでも教材条件が満点の銘柄を通知（引け後の日次実行用）")
+    ap.add_argument("--dip-scan", action="store_true",
+                    help="悪材料なし／一過性悪材料の急落を通知（場中の実行に同居。16:00以降は --scan-market か --force が無ければ回さない）")
     ap.add_argument("--summary", action="store_true",
                     help="その実行の結果を日次サマリとして通知（0件でも送る）")
     args = ap.parse_args()
@@ -335,9 +357,17 @@ def main() -> None:
 
     state = {} if args.no_state else load_state()
     tdnet = run(items, now, state, args.dry_run)
-    market = scan_market(now, state, args.dry_run, tdnet["mkt"]) if args.scan_market else None
+    market = dip = frames = None
+    if args.scan_market:
+        frames = fetch_history_batch(load_universe())   # 急落検知と共有する
+        market = scan_market(now, state, args.dry_run, tdnet["mkt"], frames)
+    if args.dip_scan:
+        if now.time() < DIP_SCAN_UNTIL or args.scan_market or args.force:
+            dip = dip_scan(now, items, state, args.dry_run, frames)
+        else:
+            print(f"{now:%H:%M} は引け後のため急落検知はスキップ（引けの判定は日次実行で行う）")
     if args.summary:
-        send(fmt_summary(now, state, tdnet, market), dry_run=args.dry_run)
+        send(fmt_summary(now, state, tdnet, market, dip), dry_run=args.dry_run)
     if not args.no_state:
         save_state(state, today)
     print(f"通知 {tdnet['hits']} 件 / 状態 {len(state)} 件")
