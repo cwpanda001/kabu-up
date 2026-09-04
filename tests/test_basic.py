@@ -161,6 +161,15 @@ assert "（08/28終値）" in txt and "出来高 -" in txt              # 休場
 txt = fmt_stock("1305", "", None)
 assert txt.startswith("■ 1305\n") and "株価データ無し" in txt
 
+# 当日の高値・安値と安値からの戻り率（急落検知と同じ見方）。前日終値を割っていない日は「－」
+s = evaluate(make_df(today, last_vol_mult=1.0), now)
+assert s.day_high > s.day_low > 0
+txt = fmt_stock("7203", "トヨタ自動車", s, today, today)
+assert " 当日 高値 " in txt and "安値からの戻り率 －" in txt
+txt = fmt_stock("7203", "トヨタ自動車", evaluate(make_df(today - timedelta(days=3)), now),
+                today - timedelta(days=3), today)
+assert "当日 高値" not in txt                                   # 当日の足が無い日は出さない
+
 # 教材判定付きのレポート（合格ケースに文脈行が付く）
 s = evaluate(make_df(today, last_vol_mult=1.0), now)
 txt = fmt_stock("7203", "トヨタ自動車", s, today, today, None, analyze(roll),
@@ -359,7 +368,173 @@ assert "mkt:" not in txt                                    # 教材スキャン
 # 教材スキャンをしなかった日はその行を出さない／保留ゼロも明示する
 txt = main_module.fmt_summary(after, {}, {"targets": 0, "hits": 0, "mkt": ("", "")}, None)
 assert "教材スキャン" not in txt and "保留中の銘柄は無し" in txt
-assert "地合い" not in txt
+assert "地合い" not in txt and "急落検知" not in txt
+
+# 急落検知は場中の各実行が state に残した分を1日ぶん合算して出す（前営業日の分は数えない）
+state["dip:6501"] = {"d": "2026-08-31", "s": "dip"}
+state["dip:4062"] = {"d": "2026-08-31", "s": "dip"}
+state["dip:9984"] = {"d": "2026-08-28", "s": "dip"}
+txt = main_module.fmt_summary(after, state, {"targets": 463, "hits": 1, "mkt": ("良好", "終値>25MA")},
+                              None, {"scanned": 225, "nodata": 0, "hits": 0, "idx": -0.3})
+assert "急落検知 本日 2件（4062, 6501）" in txt and "dip:" not in txt
+assert "TDnet 判定対象 463件 → 材料合致 2件" in txt             # dip: の記録は材料側の集計に混ざらない
+txt = main_module.fmt_summary(after, {}, {"targets": 0, "hits": 0, "mkt": ("", "")},
+                              None, {"scanned": 0, "nodata": 0, "hits": 0, "idx": None})
+assert "急落検知 本日 0件・この実行は日経平均の当日値なしで判定不能" in txt
+
+# --- 急落検知（dip.py）：値動きゲート ---
+import dip as dip_module
+from dip import classify_disclosures, evaluate_dip, fmt_dip, index_gap
+from screener import bounce_pct
+
+
+def make_dip_df(today, drop=-6.0, low=-8.0, n=120, trend=1.0):
+    """緩やかな上昇（25MA>75MA）の末尾に当日の急落を置いた日足。drop=現在値、low=当日安値の前日比%。"""
+    df = make_df(today, n=n, trend=trend, last_vol_mult=4.0, gap=drop)
+    prev = float(df["Close"].iloc[-2])
+    i = df.index[-1]
+    df.loc[i, "Open"] = prev * 0.99
+    df.loc[i, "High"] = prev
+    df.loc[i, "Low"] = prev * (1 + low / 100)
+    return df
+
+
+assert bounce_pct(940.0, 1000.0, 920.0) == 25.0          # 下げ幅80のうち20戻した
+assert bounce_pct(920.0, 1000.0, 920.0) == 0.0           # 安値に張り付き
+assert bounce_pct(1010.0, 1000.0, 920.0) == 100.0        # 全戻し以上は100で頭打ち
+assert bounce_pct(1010.0, 1000.0, 1005.0) is None        # 前日終値を割っていない日
+assert bounce_pct(1000.0, 0.0, 900.0) is None
+
+idx_up = make_path((30000, 36000, 200))                  # 当日はほぼ横ばい（+0.1%程度）
+assert index_gap(None, today) is None
+assert index_gap(make_path((30000, 36000, 200), end=today - timedelta(days=3)), today) is None
+ig = index_gap(idx_up, today)
+assert ig is not None and abs(ig) < 0.5, ig
+idx_crash = make_path((30000, 36000, 200))
+idx_crash.loc[idx_crash.index[-1], "Close"] = float(idx_crash["Close"].iloc[-2]) * 0.95
+assert abs(index_gap(idx_crash, today) + 5.0) < 0.01
+
+d = evaluate_dip(make_dip_df(today), now, ig)
+assert d.ok, d.reasons
+assert abs(d.gap_pct + 6.0) < 0.01 and abs(d.low_pct + 8.0) < 0.01
+assert d.bounce is not None and abs(d.bounce - 25.0) < 0.5     # (−6−(−8)) ÷ 8
+assert d.diff_pt is not None and d.diff_pt < -5 and d.atr_mult > 1
+assert d.ma25 > d.ma75 and d.vol_ratio > 1
+r = evaluate_dip(make_dip_df(today, drop=-3.0, low=-4.0), now, ig)
+assert not r.ok and any("下落" in x for x in r.reasons), r.reasons      # 下げ不足
+r = evaluate_dip(make_dip_df(today), now, -5.0)
+assert not r.ok and any("地合いの下げ" in x for x in r.reasons), r.reasons  # 全体が同じだけ下げた日
+r = evaluate_dip(make_dip_df(today), now, None)
+assert not r.ok and "日経平均の当日値不明" in r.reasons
+r = evaluate_dip(make_dip_df(today, trend=-1.0), now, ig)
+assert not r.ok and "トレンド不成立(25MA>75MA)" in r.reasons             # 下降トレンドの続きは拾わない
+r = evaluate_dip(make_dip_df(today - timedelta(days=3)), now, ig)
+assert not r.ok and "当日株価未取得" in r.reasons
+assert not evaluate_dip(make_path((1000, 1100, 30)), now, ig).ok      # 日足不足
+d0 = evaluate_dip(make_dip_df(today, drop=-8.0, low=-8.0), now, ig)     # 安値に張り付き
+assert d0.ok and d0.bounce == 0.0
+
+# --- 急落検知：開示の分類 ---
+assert classify_disclosures([]) == ("none", [])
+assert classify_disclosures([disc("p.pdf", "7203", "x", "業務提携に関するお知らせ")]) == ("none", [])
+assert classify_disclosures([disc("n.pdf", "7203", "x", "通期業績予想の修正（下方修正）に関するお知らせ")])[0] == "negative"
+assert classify_disclosures([disc("u.pdf", "7203", "x", "業績予想の修正に関するお知らせ")])[0] == "negative"  # 上方でも材料出尽くし
+assert classify_disclosures([disc("e.pdf", "7203", "x", "2027年3月期 第1四半期決算短信〔日本基準〕（連結）")])[0] == "earnings"
+kind, labels = classify_disclosures([disc("t.pdf", "7203", "x", "不正アクセスによる情報漏えいの可能性に関するお知らせ")])
+assert kind == "transient" and labels == ["不正アクセス", "情報漏えい"], (kind, labels)
+kind, labels = classify_disclosures([disc("t.pdf", "7203", "x", "不正アクセスに関するお知らせ"),
+                                     disc("n.pdf", "7203", "x", "特別損失の計上に関するお知らせ")])
+assert kind == "negative" and labels == ["特別損失"]            # 本物の悪材料が同時なら見送り
+
+# --- 急落検知：本文 ---
+txt = fmt_dip("6501", "日立", d, analyze(roll), "", [], "none", [], today.isoformat())
+assert txt.startswith("■ 6501 日立") and "判定 悪材料なしの急落（当日＋前営業日に開示なし）" in txt
+assert "下落 前日比 -6.0%（日経平均 +0." in txt and "当日安値" in txt and "→ 戻り率 25%" in txt
+assert "下げ幅 " in txt and "ATR" in txt and "ステージ " in txt and "節目 " in txt
+assert "損切り目安" in txt and "当日安値割れ" in txt and "戻り目標 前日終値" in txt
+assert "リスクリワード 3.0" in txt                              # (−6% 戻し) ÷ (安値まで 2%)
+assert "example.invalid" not in txt
+txt = fmt_dip("6501", "日立", d0, analyze(roll), "", [], "none", [], today.isoformat())
+assert "反発未確認" in txt and "リスクリワード算出不可" in txt      # 安値に張り付き＝比を出さない
+t_items = [disc("t.pdf", "4000", "テスト", "不正アクセスによる情報漏えいの可能性に関するお知らせ")]
+txt = fmt_dip("4000", "テスト", d, analyze(roll), "決算 09/03 予定（あと3営業日） ⚠決算またぎ回避",
+              t_items, "transient", ["不正アクセス", "情報漏えい"], today.isoformat())
+assert " 開示 10:00｜不正アクセス" in txt and "判定 一過性の悪材料（不正アクセス／情報漏えい）× 急落" in txt
+assert "決算またぎ回避" in txt and txt.rstrip().endswith("https://example.invalid/t.pdf")
+txt = fmt_dip("7203", "トヨタ", d, analyze(roll), "",
+              [disc("p.pdf", "7203", "x", "業務提携に関するお知らせ")], "none", [], today.isoformat())
+assert "判定 悪材料なしの急落（開示はあるが悪材料・決算ではない）" in txt and " 開示 10:00｜業務提携" in txt
+
+# --- 急落検知：配管（dip_scan） ---
+dip_module.send = lambda text, dry_run=False: sent.append(text)
+dip_module.time = types.SimpleNamespace(sleep=lambda *_: None)
+dip_module.fetch_market = lambda: idx_up
+dip_module.fetch_name = lambda c: "テスト株式会社"
+dip_module.next_earnings_date = lambda c: None
+dip_module.load_universe = lambda: ["7203", "6758", "9984", "8035", "9999"]
+dip_module.fetch_history_batch = lambda codes, period=None: {
+    "7203": make_dip_df(today),                  # 悪材料なしの急落 → 通知
+    "6758": make_dip_df(today),                  # 下方修正の開示あり → 見送り
+    "9984": make_dip_df(today, drop=-2.0, low=-3.0),   # 下げ不足
+    "8035": make_dip_df(today),                  # 決算短信の開示あり → 見送り
+    "9999": None,                                # 株価データ無し
+}
+dip_module.fetch_history = lambda c, period=None: make_dip_df(today)   # ユニバース外（開示キーワード経由）
+items = [disc("n.pdf", "6758", "ソニー", "通期業績予想の修正（下方修正）に関するお知らせ"),
+         disc("e.pdf", "8035", "東エレ", "2027年3月期 第1四半期決算短信〔日本基準〕（連結）", d="2026-08-28"),
+         disc("t.pdf", "4000", "テスト", "不正アクセスによる情報漏えいの可能性に関するお知らせ")]
+sent.clear()
+state = {}
+st = dip_module.dip_scan(intraday, items, state, dry_run=False)
+assert st == {"scanned": 6, "nodata": 1, "hits": 2, "idx": ig}, st
+assert len(sent) == 2, sent
+assert sent[0].startswith("【一過性悪材料×急落】08/31 10:00\n地合い 日経平均 良好")
+assert "■ 4000 テスト株式会社" in sent[0] and "不正アクセス" in sent[0]
+assert "https://example.invalid/t.pdf" in sent[0] and "7203" not in sent[0]
+assert sent[1].startswith("【急落検知（悪材料なし）】08/31 10:00")
+assert "■ 7203 テスト株式会社" in sent[1] and "必ず戻る保証は無い" in sent[1]
+assert all(c not in sent[1] for c in ("6758", "9984", "8035", "9999", "4000"))
+assert state["dip:7203"] == {"d": "2026-08-31", "s": "dip"} and "dip:4000" in state
+assert "dip:6758" not in state and "dip:8035" not in state
+
+# クールダウン中は再通知しない。明けたら再び通知する
+sent.clear()
+assert dip_module.dip_scan(intraday, items, state, dry_run=False)["hits"] == 0 and not sent
+state["dip:7203"]["d"] = "2026-08-20"
+sent.clear()
+assert dip_module.dip_scan(intraday, items, state, dry_run=False)["hits"] == 1
+assert len(sent) == 1 and "■ 7203" in sent[0]
+
+# 決算発表当日（yfinance の決算日）は見送り
+dip_module.next_earnings_date = lambda c: today
+sent.clear(); state = {}
+assert dip_module.dip_scan(intraday, items, state, dry_run=False)["hits"] == 0 and not sent
+dip_module.next_earnings_date = lambda c: None
+
+# 全体が暴落した日は1件も鳴らない（地合いの下げ）
+dip_module.fetch_market = lambda: idx_crash
+sent.clear(); state = {}
+assert dip_module.dip_scan(intraday, items, state, dry_run=False)["hits"] == 0 and not sent
+
+# 日経平均の当日値が無ければ何も取りに行かずにスキップ
+dip_module.fetch_market = lambda: make_path((30000, 36000, 200), end=today - timedelta(days=3))
+dip_module.fetch_history_batch = lambda codes, period=None: (_ for _ in ()).throw(AssertionError("取得された"))
+st = dip_module.dip_scan(intraday, items, {}, dry_run=False)
+assert st["scanned"] == 0 and st["hits"] == 0 and st["idx"] is None
+dip_module.fetch_market = lambda: idx_up
+
+# 日次実行では教材スキャンの日足を使い回す（取り直さない）／引け後の注記が付く
+sent.clear(); state = {}
+st = dip_module.dip_scan(after, items, state, dry_run=False, frames={"7203": make_dip_df(today)})
+assert st["hits"] == 2 and "翌営業日の寄付き" in sent[1]         # ユニバース外の 4000 は個別に取る
+dip_module.fetch_history_batch = lambda codes, period=None: {}
+
+# ユニバース検知を止めても開示キーワード検知は動く
+config.DIP_SCAN_UNIVERSE = False
+sent.clear(); state = {}
+st = dip_module.dip_scan(intraday, items, state, dry_run=False)
+assert st["scanned"] == 1 and st["hits"] == 1 and "4000" in sent[0]
+config.DIP_SCAN_UNIVERSE = True
 
 # --- スキャン対象ユニバース ---
 import nikkei225
