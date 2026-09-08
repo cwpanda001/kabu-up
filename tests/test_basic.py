@@ -323,6 +323,7 @@ assert stats["hits"] == 2 and stats["targets"] == 3, stats
 assert len(sent) == 1
 body = sent[0]
 assert body.count("■ 7203") == 1, body                      # 同じ銘柄が二重に並ばない
+assert "■ 7203 トヨタ自動車" in body                          # TDnet の略称ではなくフル社名で出す
 assert "自己株式の取得／業務提携" in body                     # ラベルはまとめて表記
 assert body.count("開示 10:00｜") == 3                       # 開示行は3件ぶん残る
 assert "https://example.invalid/a.pdf" in body and "https://example.invalid/b.pdf" in body
@@ -335,7 +336,7 @@ state = {}
 stats = main_module.run(items, intraday, state, dry_run=False)
 assert stats["hits"] == 0 and not sent
 assert state["a.pdf"]["s"] == "pending" and state["a.pdf"]["c"] == "7203"
-assert state["a.pdf"]["n"] == "トヨタ" and "トレンド不成立" in state["a.pdf"]["r"]
+assert state["a.pdf"]["n"] == "トヨタ自動車" and "トレンド不成立" in state["a.pdf"]["r"]
 
 # 判定済み（notified/skipped）は再判定しない
 main_module.fetch_history = lambda c: (_ for _ in ()).throw(AssertionError("再取得された"))
@@ -587,5 +588,66 @@ with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=Fa
     tmp = f.name
 assert nikkei225.load_universe(tmp) == ["7203", "6758"]      # コメント・重複・不正を除く
 os.unlink(tmp)
+
+# 日経225のコードには社名が付いている（通知の見出しを英語にしないため）
+assert list(nikkei225.NAMES) == nikkei225.NIKKEI225
+assert all(nikkei225.NAMES.values()), [c for c, n in nikkei225.NAMES.items() if not n]
+
+# --- 社名の解決（names.py） ---
+import names as names_module
+names_module.reset()
+assert names_module.jp_name("7267") == "本田技研工業"      # 同梱の対応表
+assert names_module.jp_name("72670") == "本田技研工業"     # TDnet式の5桁も4桁に揃える
+assert names_module.jp_name("130A") == ""                  # 知らないコードは空（呼び出し側が英語名にする）
+assert names_module.display("130A", "Some Corp") == "Some Corp"
+
+# TDnet の社名（幅で切られた略称）は覚えるが、同梱のフル社名のほうを優先する
+Disc = types.SimpleNamespace
+names_module.learn([Disc(code="63670", name="ダイキン工"), Disc(code="130A0", name="テスト製作所"),
+                    Disc(code="Copyright", name="©"), Disc(code="99990", name="  ")])
+assert names_module.jp_name("6367") == "ダイキン工業"       # 同梱 > TDnet の略称
+assert names_module.jp_name("130A") == "テスト製作所"       # 日経225の外はTDnet由来で日本語になる
+assert names_module.display("130A", "Some Corp") == "テスト製作所"
+assert "9999" not in names_module._get_cache()             # 空の社名・開示以外の行は覚えない
+
+# state/names.txt（自分で書く対応表）が最優先
+with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as f:
+    f.write("7267 ホンダ\n6367,ダイキン  # 区切りはカンマでもよい\nbogus 何か\n\n# コメント行\n")
+    tmp = f.name
+names_module.OVERRIDE_PATH = tmp
+names_module.reset()
+assert names_module.jp_name("7267") == "ホンダ" and names_module.jp_name("6367") == "ダイキン"
+assert names_module.jp_name("7203") == "トヨタ自動車"       # 書いていない銘柄は同梱の対応表のまま
+os.unlink(tmp)
+
+# 覚えた社名は state/names.json に残り、次の実行でも使える
+with tempfile.TemporaryDirectory() as d:
+    cache = os.path.join(d, "names.json")
+    names_module.OVERRIDE_PATH = os.path.join(d, "names.txt")   # 存在しない = 上書きなし
+    names_module.CACHE_PATH = cache
+    names_module.reset()
+    names_module.save_cache(cache)
+    assert not os.path.exists(cache)                            # 覚えた社名が無ければ書かない
+    names_module.learn([Disc(code="130A0", name="テスト製作所")])
+    names_module.save_cache(cache)
+    names_module.reset()
+    assert names_module.jp_name("130A") == "テスト製作所"
+    open(cache, "w", encoding="utf-8").write("壊れたJSON{")
+    names_module.reset()
+    assert names_module.jp_name("130A") == "" and names_module.jp_name("7267") == "本田技研工業"
+
+# fetch_name(): 日本語名が分かる銘柄は yfinance を呼ばない（レート制限対策）。
+# 分からない銘柄だけ英語名で代用するので、社名の欄が空になることはない
+names_module.OVERRIDE_PATH, names_module.CACHE_PATH = "/nonexistent.txt", "/nonexistent.json"
+names_module.reset()
+import importlib
+si = importlib.reload(stock_info)           # 上のテストで差し替えた fetch_name を戻す
+sys.modules["yfinance"] = types.SimpleNamespace(
+    Ticker=lambda t: (_ for _ in ()).throw(AssertionError(f"yfinance を呼んだ: {t}")))
+assert si.fetch_name("7267") == "本田技研工業"
+sys.modules["yfinance"] = types.SimpleNamespace(
+    Ticker=lambda t: types.SimpleNamespace(info={"longName": "Some Corp"}))
+assert si.fetch_name("130A") == "Some Corp"
+del sys.modules["yfinance"]
 
 print("all tests passed")

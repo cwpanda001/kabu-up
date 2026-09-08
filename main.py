@@ -24,6 +24,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 
 import config
+import names
 from chart_context import (analyze, context_lines, earnings_note, is_trading_day,
                            market_condition, prev_trading_day, room_line, scan_ok, stance, yen)
 from dip import dip_scan
@@ -95,7 +96,7 @@ def fmt_hit(items: list[Disclosure], v: dict, s, ctx, earn: str,
         label += f"（AI: {v['ai'].get('summary', '')}）"
     elif v.get("note"):
         label += f"（{v['note']}）"
-    lines = [f"■ {items[0].code4} {items[0].name}"]
+    lines = [f"■ {items[0].code4} {names.display(items[0].code4, items[0].name)}"]
     for it in items:
         day = "" if it.date == today else f"{it.date[5:].replace('-', '/')} "
         lines.append(f" 開示 {day}{it.time}｜{it.title}")
@@ -159,9 +160,10 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> d
         group.sort(key=lambda g: -g[1]["score"])   # 代表はスコアの高い開示
         its = [g[0] for g in group]
         v = merge_judge([g[1] for g in group])
+        name = names.display(code4, its[0].name)   # 日本語のフル社名（無ければTDnetの略称）
 
         def mark(status: str, reasons: str = "") -> None:
-            mark_state(state, group, status, code4, its[0].name, reasons)
+            mark_state(state, group, status, code4, name, reasons)
 
         if screened >= config.MAX_SCREEN_PER_RUN:
             mark("pending", f"スクリーニング上限{config.MAX_SCREEN_PER_RUN}銘柄で未判定")
@@ -170,24 +172,24 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> d
         df = fetch_history(code4)
         time.sleep(1.0)  # yfinance レート制限対策
         if df is None:
-            print(f"[skip] {code4} {its[0].name}: 株価データ無し（ETF/REIT等）")
+            print(f"[skip] {code4} {name}: 株価データ無し（ETF/REIT等）")
             mark("skipped")
             continue
         s = evaluate(df, now)
 
         if not s.passed:
             reasons = ", ".join(s.reasons)
-            print(f"[pend] {code4} {its[0].name}: {v['labels']} / {reasons}")
+            print(f"[pend] {code4} {name}: {v['labels']} / {reasons}")
             mark("pending", reasons)
             continue
         if config.MARKET_FILTER_HARD and mkt[0] == "悪化":
-            print(f"[hold] {code4} {its[0].name}: 地合い悪化のため通知保留（{mkt[1]}）")
+            print(f"[hold] {code4} {name}: 地合い悪化のため通知保留（{mkt[1]}）")
             mark("pending", f"地合い悪化のため保留（{mkt[1]}）")
             continue
 
         ctx = analyze(df)
         earn = earnings_note(next_earnings_date(code4), now.date())
-        print(f"[HIT]  {code4} {its[0].name}: {v['labels']} 出来高{s.vol_ratio:.1f}倍 "
+        print(f"[HIT]  {code4} {name}: {v['labels']} 出来高{s.vol_ratio:.1f}倍 "
               f"gap{s.gap_pct:+.1f}% {ctx.stage}")
         hits.append((its, v, s, ctx, earn))
         mark("notified")
@@ -342,6 +344,8 @@ def main() -> None:
         send(stock_report(args.stock, now,
                           disclosure_days=[today, prev_trading_day(today)]),
              dry_run=args.dry_run)
+        if not args.no_state:
+            names.save_cache()
         print(f"銘柄状況を送信した: {args.stock}")
         return
     if not args.sample and not args.force and not is_trading_day(today):
@@ -354,6 +358,7 @@ def main() -> None:
     else:
         items = fetch_day(today) + fetch_day(prev_trading_day(today))
     print(f"{now:%Y-%m-%d %H:%M} 開示 {len(items)} 件取得")
+    names.learn(items)   # 通知の見出しを日本語にするための社名を覚える
 
     state = {} if args.no_state else load_state()
     tdnet = run(items, now, state, args.dry_run)
@@ -370,6 +375,7 @@ def main() -> None:
         send(fmt_summary(now, state, tdnet, market, dip), dry_run=args.dry_run)
     if not args.no_state:
         save_state(state, today)
+        names.save_cache()
     print(f"通知 {tdnet['hits']} 件 / 状態 {len(state)} 件")
 
 
