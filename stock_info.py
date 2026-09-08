@@ -11,6 +11,7 @@ import time
 from datetime import date, datetime
 
 import config
+import names
 from chart_context import (analyze, context_lines, earnings_note, market_condition,
                            room_line, stance, yen)
 from judge import keyword_judge
@@ -36,7 +37,13 @@ def parse_codes(arg: str) -> list[str]:
 
 
 def fetch_name(code4: str) -> str:
-    """yfinance から社名を取る（英語名）。失敗しても空文字で続行する。"""
+    """通知に出す社名。日本語名（names.py）を優先し、無ければ yfinance の英語名で代用する。
+
+    日本語名が分かる銘柄は yfinance への問い合わせ自体を省ける（レート制限対策）。
+    """
+    jp = names.jp_name(code4)
+    if jp:
+        return jp
     try:
         import yfinance as yf
         info = yf.Ticker(f"{code4}.T").info or {}
@@ -113,6 +120,7 @@ def stock_report(arg: str, now: datetime | None = None,
     items = None
     if disclosure_days:
         items = [it for d in disclosure_days for it in fetch_day(d)]
+        names.learn(items)      # 日経225の外の銘柄も日本語で出せるようにする
 
     mkt = market_condition(fetch_market())
     codes = parse_codes(arg)

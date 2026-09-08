@@ -105,7 +105,10 @@ jobs:
           set -e
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state/seen.json
+          # names.json = TDnet から覚えた日本語の社名。初回実行までは存在しない
+          for f in state/seen.json state/names.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
           if git diff --cached --quiet; then
             echo "no change"; exit 0
           fi
