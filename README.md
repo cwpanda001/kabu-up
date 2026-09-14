@@ -92,6 +92,7 @@ TDnet一覧HTML ─→ キーワード一次判定 ─→ (方向不明ならPDF
 | Secret 名 | 用途 | 必要性 |
 |---|---|---|
 | `SLACK_WEBHOOK_URL` | Slack Incoming Webhook。**一番簡単。まずこれを推奨** | 通知先はどれか1つあればよい |
+| 任意の名前（例 `YUKO`） | 2人目以降の Slack Incoming Webhook。→ [通知先を増やす](#slack--通知先を増やす2人目以降) | 任意 |
 | `SLACK_BOT_TOKEN` ＋ `SLACK_CHANNEL` | Slack Bot。Webhook を禁止しているワークスペース向け | 〃 |
 | `DISCORD_WEBHOOK_URL` | Discord Webhook | 〃 |
 | `LINE_CHANNEL_ACCESS_TOKEN` ＋ `LINE_USER_ID` | LINE Messaging API push（無料枠 月200通） | 〃 |
@@ -109,6 +110,23 @@ Secret は登録後に中身を再表示できない。控えは手元に残し�
 5. GitHub に Secret 名 `SLACK_WEBHOOK_URL` で登録
 
 このURLを知っていれば誰でもそのチャンネルに投稿できる。**コードに直書きせず必ず Secret に入れる。**
+
+#### Slack : 通知先を増やす（2人目以降）
+
+Webhook をもう1つ作り（手順は上と同じ。増やしたいチャンネルを選んで **Add New Webhook to Workspace**）、
+**好きな Secret 名**で登録する（人名など。例 `YUKO`）。そのうえで `.github/workflows/watch.yml` の
+`env:` に1行足す。
+
+```yaml
+          SLACK_WEBHOOK_URL_YUKO: ${{ secrets.YUKO }}
+```
+
+`SLACK_WEBHOOK_URL_` で始まる環境変数は**すべて宛先として拾われ**、登録した全員に同じ通知が飛ぶ。
+Secret 名は自由だが、**env 側の名前は必ず `SLACK_WEBHOOK_URL_` で始める**こと。
+**Secret を登録しただけでは届かない**（workflow の `env:` に書いた変数だけがジョブに渡るため）。
+`YUKO` は配線済み。Secret が未登録なら空文字が入るだけで、何も起こらない。
+
+1つの Secret にカンマや改行で区切って複数URLを入れてもよい。この形なら workflow を触らずに増やせる。
 
 #### Slack : Bot token（Webhook が使えない場合）
 

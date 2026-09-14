@@ -63,6 +63,9 @@ jobs:
         env:
           TZ: Asia/Tokyo
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          # 2人目以降の Slack 宛先。Secret 名は自由（人名など）でよく、env 側で
+          # SLACK_WEBHOOK_URL_* という名前にすれば notify.py が自動で全部に送る
+          SLACK_WEBHOOK_URL_YUKO: ${{ secrets.YUKO }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

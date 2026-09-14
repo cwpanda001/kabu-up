@@ -1,14 +1,18 @@
 """通知。環境変数が設定されている先へ送る。どれも無ければ標準出力に出す。
 
   SLACK_WEBHOOK_URL                        : Slack Incoming Webhook（無制限・設定が一番簡単）
+  SLACK_WEBHOOK_URL_*                      : 2人目以降の Slack Incoming Webhook（例 SLACK_WEBHOOK_URL_YUKO）
   SLACK_BOT_TOKEN + SLACK_CHANNEL          : Slack Bot（Webhookを禁止しているワークスペース向け）
   DISCORD_WEBHOOK_URL                      : Discord Webhook（無制限）
   LINE_CHANNEL_ACCESS_TOKEN + LINE_USER_ID : LINE Messaging API push（無料枠 月200通）
   NOTIFY_WEBHOOK_URL                       : 任意のURLへ {"text": "..."} を JSON POST（自作API等）
 
-複数設定した場合は全部に送る。
+複数設定した場合は全部に送る。Slack の Webhook だけは宛先が増えやすいので、
+`SLACK_WEBHOOK_URL` の接尾辞違い（`SLACK_WEBHOOK_URL_YUKO` など）をすべて拾い、
+さらに1つの値にカンマ・改行区切りで複数URLを入れることもできる。
 """
 import os
+import re
 
 import requests
 
@@ -19,19 +23,39 @@ def _chunks(text: str, n: int):
         text = text[n:]
 
 
+def slack_webhooks(env=None) -> list[tuple[str, str]]:
+    """Slack Webhook の (環境変数名, URL) を列挙する。
+
+    URLは秘密情報なのでログには出さない。どの宛先で失敗したかを言えるよう、
+    エラー表示用に環境変数名を一緒に返す。同じURLが複数の変数に入っていても
+    二重送信しないよう、最初に出てきたものだけを残す。
+    """
+    env = os.environ if env is None else env
+    names = [n for n in env if n == "SLACK_WEBHOOK_URL" or n.startswith("SLACK_WEBHOOK_URL_")]
+    # SLACK_WEBHOOK_URL を先頭に、残りは名前順。環境変数の並び順は保証されないので
+    # 実行ごとに通知順が変わらないよう明示的に並べる
+    names.sort(key=lambda n: (n != "SLACK_WEBHOOK_URL", n))
+    out, seen = [], set()
+    for name in names:
+        for url in re.split(r"[\s,]+", env[name].strip()):
+            if url and url not in seen:
+                seen.add(url)
+                out.append((name, url))
+    return out
+
+
 def send(text: str, dry_run: bool = False) -> None:
     if dry_run:
         print(text)
         return
     sent = False
 
-    wh = os.environ.get("SLACK_WEBHOOK_URL")
-    if wh:
+    for name, wh in slack_webhooks():
         for c in _chunks(text, 3800):
             # unfurl_links=False: TDnetのPDFリンクをSlackが展開して長くなるのを防ぐ
             r = requests.post(wh, json={"text": c, "unfurl_links": False}, timeout=20)
             if r.status_code != 200:
-                print(f"[notify] Slack webhook error {r.status_code}: {r.text[:200]}")
+                print(f"[notify] Slack webhook error [{name}] {r.status_code}: {r.text[:200]}")
         sent = True
 
     tok, ch = os.environ.get("SLACK_BOT_TOKEN"), os.environ.get("SLACK_CHANNEL")

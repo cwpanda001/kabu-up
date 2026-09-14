@@ -650,4 +650,25 @@ sys.modules["yfinance"] = types.SimpleNamespace(
 assert si.fetch_name("130A") == "Some Corp"
 del sys.modules["yfinance"]
 
+# --- 通知先（Slack Webhook の複数指定） ---
+# Secret 名は人名などでもよく、workflow 側で SLACK_WEBHOOK_URL_* という env 名に
+# 割り当てれば宛先として拾われる。順番は SLACK_WEBHOOK_URL が先頭、あとは名前順
+sw = notify_module.slack_webhooks
+assert sw({}) == []
+assert sw({"SLACK_WEBHOOK_URL": "https://a"}) == [("SLACK_WEBHOOK_URL", "https://a")]
+assert sw({"SLACK_WEBHOOK_URL_YUKO": "https://y", "OTHER": "https://x"}) == \
+    [("SLACK_WEBHOOK_URL_YUKO", "https://y")]
+assert sw({"SLACK_WEBHOOK_URL_YUKO": "https://y", "SLACK_WEBHOOK_URL": "https://a",
+           "SLACK_WEBHOOK_URL_ABE": "https://b"}) == \
+    [("SLACK_WEBHOOK_URL", "https://a"), ("SLACK_WEBHOOK_URL_ABE", "https://b"),
+     ("SLACK_WEBHOOK_URL_YUKO", "https://y")]
+# 1つの Secret にカンマ・改行区切りで複数入れてもよい
+assert sw({"SLACK_WEBHOOK_URL": "https://a, https://b\nhttps://c"}) == \
+    [("SLACK_WEBHOOK_URL", "https://a"), ("SLACK_WEBHOOK_URL", "https://b"),
+     ("SLACK_WEBHOOK_URL", "https://c")]
+# 空の Secret（未登録時に env へ空文字で入る）は宛先にしない。同じURLの重複送信もしない
+assert sw({"SLACK_WEBHOOK_URL": "", "SLACK_WEBHOOK_URL_YUKO": "  "}) == []
+assert sw({"SLACK_WEBHOOK_URL": "https://a", "SLACK_WEBHOOK_URL_YUKO": "https://a"}) == \
+    [("SLACK_WEBHOOK_URL", "https://a")]
+
 print("all tests passed")
