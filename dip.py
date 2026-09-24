@@ -25,10 +25,11 @@
 """
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import config
-from chart_context import analyze, context_lines, earnings_note, market_condition, yen
+from chart_context import (analyze, context_lines, earnings_note, market_condition,
+                           trading_days_ago, yen)
 from nikkei225 import load_universe
 from notify import send
 from screener import (bounce_pct, evaluate, fetch_history, fetch_history_batch, fetch_market,
@@ -239,7 +240,7 @@ def dip_scan(now: datetime, items: list, state: dict, dry_run: bool, frames: dic
         frames[c] = fetch_history(c, period=config.DIP_HISTORY_PERIOD)
         time.sleep(1.0)  # yfinance レート制限対策
 
-    cooldown = (today - timedelta(days=config.DIP_COOLDOWN_DAYS)).isoformat()
+    cooldown = trading_days_ago(today, config.DIP_COOLDOWN_DAYS).isoformat()
     groups: dict[str, list] = {"transient": [], "none": []}
     for code4 in targets:
         df = frames.get(code4)

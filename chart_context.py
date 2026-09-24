@@ -44,6 +44,18 @@ def prev_trading_day(d: date) -> date:
     return d
 
 
+def trading_days_ago(d: date, n: int) -> date:
+    """d から n 営業日さかのぼった日（n=0 なら d そのもの）。
+
+    連休をまたぐと暦日数と営業日数がずれる。「N日前」を暦日で切ると、3連休明けには
+    前営業日（＝引け後開示をまだ再判定・通知抑止している日）まで切り捨ててしまうので、
+    state の保持期間やクールダウンはこれで営業日単位に数える。
+    """
+    for _ in range(n):
+        d = prev_trading_day(d)
+    return d
+
+
 def trading_days_until(d0: date, d1: date) -> int:
     """d0 の翌日から d1 までの営業日数（d1 が営業日なら d1 も数える）。"""
     n, d = 0, d0

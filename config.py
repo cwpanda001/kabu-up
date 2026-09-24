@@ -22,7 +22,7 @@ BATCH_CHUNK    = 40    # yf.download でまとめて取る銘柄数（--scan-mar
 SCAN_REQUIRE_VOLUME     = False  # 材料が無い銘柄の出来高が平常なのは当たり前
 SCAN_REQUIRE_ABOVE_MA25 = False  # 押し目＝25MAを割った状態。課すと追随期の84%を弾く
 SCAN_REQUIRE_ROOM       = False  # 上値余地はゲートにせず通知に数値で出す
-SCAN_COOLDOWN_DAYS      = 3      # 同じ銘柄を再通知しない日数（state の保持期間と合わせる）
+SCAN_COOLDOWN_DAYS      = 3      # 同じ銘柄を再通知しない営業日数（state の保持期間と合わせる）
 
 # ---------- 急落検知（--dip-scan。一時的な下げからの戻りを狙う枠。dip.py） ----------
 # 材料×チャート通知の裏返し。「悪材料が無いのに大きく下げた」銘柄と「一過性とみなせる
@@ -33,7 +33,7 @@ DIP_DROP_PCT        = 5.0   # 前日終値比がこれ以上下げていたら�
 DIP_INDEX_DIFF_PT   = 3.0   # 日経平均の当日騰落率との差（pt）がこれ以上。全体が同じだけ下げた日は地合いの下げなので鳴らない
 DIP_BOUNCE_CONFIRM_PCT = 10 # 当日安値からの戻り率がこれ未満なら「反発未確認」（リスクリワードを出さない）
 DIP_HISTORY_PERIOD  = "1y"  # 場中15分おきに全銘柄を取るので日足の取得期間を短くする（75MA・ATR・週足の節目には足りる）
-DIP_COOLDOWN_DAYS   = 3     # 同じ銘柄を再通知しない日数（下げが続いても毎日は鳴らさない）
+DIP_COOLDOWN_DAYS   = 3     # 同じ銘柄を再通知しない営業日数（下げが続いても毎日は鳴らさない）
 DIP_SCAN_UNIVERSE   = True  # False にすると日経225の値動き検知をやめ、開示キーワード検知だけになる（yfinance が詰まったとき用）
 # 一過性とみなす悪材料。この開示 × 急落 は【一過性悪材料×急落】として通知する
 DIP_TRANSIENT_KEYWORDS = [

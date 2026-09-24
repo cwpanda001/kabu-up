@@ -74,6 +74,27 @@ assert pdf_direction("通期の業績予想を上方修正いたします。売�
 assert pdf_direction("業績予想を下方修正いたします") == "negative"
 assert pdf_direction("") is None
 
+# --- state の保持期間（営業日で数える） ---
+# 2026-09-21〜23 は3連休。連休明け 9/24 の実行で、前営業日 9/18 の「通知済み」が
+# 暦日3日の切り捨てで消え、9/18 引け後開示を実行のたびに再通知していた
+from chart_context import trading_days_ago
+assert trading_days_ago(date(2026, 9, 24), 0) == date(2026, 9, 24)
+assert trading_days_ago(date(2026, 9, 24), 1) == date(2026, 9, 18)
+assert trading_days_ago(date(2026, 9, 24), 3) == date(2026, 9, 16)
+assert trading_days_ago(date(2026, 9, 18), 3) == date(2026, 9, 15)
+st = {
+    "a.pdf": {"d": "2026-09-18", "s": "notified", "v": {}},   # 前営業日の引け後開示
+    "b.pdf": {"d": "2026-09-16", "s": "pending", "v": {}},
+    "c.pdf": {"d": "2026-09-15", "s": "skipped"},             # 3営業日より前 → 落とす
+    "mkt:7203": {"d": "2026-09-18", "s": "market"},
+    "dip:6758": {"d": "2026-09-11", "s": "dip"},
+}
+kept = main_module.prune_state(st, date(2026, 9, 24))
+assert set(kept) == {"a.pdf", "b.pdf", "mkt:7203"}, set(kept)
+# 連休が無い平日でも同じ結果（9/18 の実行なら 9/15 以降を残す）
+kept = main_module.prune_state(st, date(2026, 9, 18))
+assert set(kept) == {"a.pdf", "b.pdf", "c.pdf", "mkt:7203"}, set(kept)
+
 # --- 立会時間の按分 ---
 mk = lambda h, m: datetime(2026, 8, 31, h, m, tzinfo=JST)
 assert session_fraction(mk(8, 0)) == 0.0
