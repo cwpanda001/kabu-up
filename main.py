@@ -20,13 +20,14 @@ import argparse
 import json
 import os
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from datetime import time as dtime
 
 import config
 import names
 from chart_context import (analyze, context_lines, earnings_note, is_trading_day,
-                           market_condition, prev_trading_day, room_line, scan_ok, stance, yen)
+                           market_condition, prev_trading_day, room_line, scan_ok, stance,
+                           trading_days_ago, yen)
 from dip import dip_scan
 from judge import judge
 from nikkei225 import load_universe
@@ -37,7 +38,9 @@ from stock_info import fetch_name, stock_report
 from tdnet import Disclosure, fetch_day, parse_list
 
 STATE_PATH = "state/seen.json"
-# 教材スキャン・急落検知のクールダウン判定に state を使うので、保持期間はそれより短くしない
+# 教材スキャン・急落検知のクールダウン判定に state を使うので、保持期間はそれより短くしない。
+# 営業日で数える（暦日だと3連休明けに前営業日の「通知済み」まで消えて、引け後開示を
+# 実行のたびに再通知していた）
 KEEP_DAYS = max(3, config.SCAN_COOLDOWN_DAYS, config.DIP_COOLDOWN_DAYS)
 # 急落検知は場中の枠。これ以降の実行では回さない（引けの判定は 16:35 の日次実行が --scan-market と一緒に行う）
 DIP_SCAN_UNTIL = dtime(16, 0)
@@ -51,9 +54,18 @@ def load_state() -> dict:
         return {}
 
 
+def prune_state(state: dict, today: date) -> dict:
+    """KEEP_DAYS 営業日より古い記録を落とす。
+
+    run() は前営業日の引け後開示も判定対象にするので、前営業日の記録は必ず残す
+    （KEEP_DAYS>=1 なので営業日で数えれば自動的に残る）。
+    """
+    cutoff = trading_days_ago(today, KEEP_DAYS).isoformat()
+    return {k: v for k, v in state.items() if v.get("d", "") >= cutoff}
+
+
 def save_state(state: dict, today: date) -> None:
-    cutoff = (today - timedelta(days=KEEP_DAYS)).isoformat()
-    state = {k: v for k, v in state.items() if v.get("d", "") >= cutoff}
+    state = prune_state(state, today)
     os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=0)
@@ -224,7 +236,7 @@ def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = N
     if not mkt or not mkt[0]:          # run() で取れていればそれを使い回す
         mkt = market_condition(fetch_market())
     print(f"教材スキャン 対象{len(codes)}銘柄 / 地合い {mkt[0] or '判定不能'}")
-    cooldown = (now.date() - timedelta(days=config.SCAN_COOLDOWN_DAYS)).isoformat()
+    cooldown = trading_days_ago(now.date(), config.SCAN_COOLDOWN_DAYS).isoformat()
 
     if frames is None:
         frames = fetch_history_batch(codes)
