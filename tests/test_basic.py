@@ -87,13 +87,14 @@ st = {
     "b.pdf": {"d": "2026-09-16", "s": "pending", "v": {}},
     "c.pdf": {"d": "2026-09-15", "s": "skipped"},             # 3営業日より前 → 落とす
     "mkt:7203": {"d": "2026-09-18", "s": "market"},
+    "chart:6501": {"d": "2026-09-17", "s": "chart"},
     "dip:6758": {"d": "2026-09-11", "s": "dip"},
 }
 kept = main_module.prune_state(st, date(2026, 9, 24))
-assert set(kept) == {"a.pdf", "b.pdf", "mkt:7203"}, set(kept)
+assert set(kept) == {"a.pdf", "b.pdf", "mkt:7203", "chart:6501"}, set(kept)
 # 連休が無い平日でも同じ結果（9/18 の実行なら 9/15 以降を残す）
 kept = main_module.prune_state(st, date(2026, 9, 18))
-assert set(kept) == {"a.pdf", "b.pdf", "c.pdf", "mkt:7203"}, set(kept)
+assert set(kept) == {"a.pdf", "b.pdf", "c.pdf", "mkt:7203", "chart:6501"}, set(kept)
 
 # --- 立会時間の按分 ---
 mk = lambda h, m: datetime(2026, 8, 31, h, m, tzinfo=JST)
@@ -264,6 +265,11 @@ assert s.passed, s.reasons
 assert s.vol_ratio < config.VOLUME_RATIO                   # 数値は表示用に残る
 assert evaluate(low_vol, intraday, require_volume=False).passed        # 明示 OFF
 assert not evaluate(low_vol, after, require_volume=True).passed        # 明示 ON
+# 倍率は枠ごとに変えられる（チャート条件スキャンは CHART_SCAN_VOLUME_RATIO で見る）
+mid_vol = make_df(today, last_vol_mult=0.3)                # 按分後 ≒1.65倍
+assert evaluate(mid_vol, intraday).passed
+assert not evaluate(mid_vol, intraday, volume_ratio=2.0).passed
+assert any("<2" in x for x in evaluate(mid_vol, intraday, volume_ratio=2.0).reasons)
 
 # --- 教材条件の点数（通知に併記する総合評価） ---
 from chart_context import Context, room_line, scan_ok, stance_score
@@ -349,6 +355,49 @@ assert "自己株式の取得／業務提携" in body                     # ラ�
 assert body.count("開示 10:00｜") == 3                       # 開示行は3件ぶん残る
 assert "https://example.invalid/a.pdf" in body and "https://example.invalid/b.pdf" in body
 assert all(state[k]["s"] == "notified" for k in ("a.pdf", "b.pdf", "c.pdf"))
+assert state["a.pdf"]["c"] == "7203" and state["c.pdf"]["c"] == "6758"   # 通知済みでもコードは残す
+assert "soft" in stats and stats["soft"] == 0
+# 材料ニュースの枠で扱っている銘柄（当日＋前営業日）。スキャン系の枠はこれを除く
+assert main_module.news_codes(state, today) == {"7203", "6758"}
+assert main_module.news_codes({"old.pdf": {"d": "2026-08-20", "s": "notified", "c": "7203"},
+                               "s.pdf": {"d": "2026-08-31", "s": "skipped", "c": "6758"}}, today) == set()
+
+# --- run(): チャート4条件が未達でも、教材条件が揃っていれば【材料×教材条件】で通知 ---
+import chart_context
+pull = make_df(today, n=120, trend=1.0, gap=-1.0)
+pull.loc[pull.index[-1], "Close"] = float(pull["Close"].iloc[-30:].mean()) * 0.97   # 25MAを割った押し目
+assert not evaluate(pull, intraday).passed and any("現在値>25MA" in x for x in evaluate(pull, intraday).reasons)
+main_module.fetch_history = lambda c: pull
+main_module.scan_ok = lambda ctx, mkt_label="": True        # 教材条件は scan_ok で検証済みなので配管だけ見る
+sent.clear(); state = {}
+stats = main_module.run(items, intraday, state, dry_run=False)
+assert stats["hits"] == 2 and stats["soft"] == 2, stats
+assert len(sent) == 1 and sent[0].startswith("【材料×教材条件】08/31 10:00"), sent[0][:60]
+body = sent[0]
+assert "■ 7203 トヨタ自動車" in body and "■ 6758" in body
+assert " 判定 自己株式の取得／業務提携" in body
+assert "条件 教材条件クリア（追随期の押し目反発）／ チャート条件は未達: トレンド不成立(現在値>25MA>75MA)" in body
+assert "教材条件\n　（上昇トレンド・追随期・25MA上向き・地合い良好）が揃った銘柄" in body
+assert all(state[k]["s"] == "notified" for k in ("a.pdf", "b.pdf", "c.pdf"))
+# 教材条件も未達なら従来どおり保留
+main_module.scan_ok = lambda ctx, mkt_label="": False
+sent.clear(); state = {}
+stats = main_module.run(items, intraday, state, dry_run=False)
+assert stats["hits"] == 0 and not sent and state["a.pdf"]["s"] == "pending"
+assert "現在値>25MA" in state["a.pdf"]["r"]
+# 教材条件は揃っていても、緩いガード（25MA>75MA など）が落ちれば保留
+main_module.scan_ok = lambda ctx, mkt_label="": True
+main_module.fetch_history = lambda c: make_df(today, trend=-1.0)
+sent.clear(); state = {}
+assert main_module.run(items, intraday, state, dry_run=False)["hits"] == 0 and not sent
+assert state["a.pdf"]["s"] == "pending"
+# 厳しい条件と緩い条件の両方を通る銘柄は従来の【材料×チャート一致】のまま（二重にならない）
+main_module.fetch_history = lambda c: make_df(today, last_vol_mult=1.0)
+sent.clear(); state = {}
+stats = main_module.run(items, intraday, state, dry_run=False)
+assert stats["hits"] == 2 and stats["soft"] == 0 and len(sent) == 1
+assert sent[0].startswith("【材料×チャート一致】") and "条件 教材条件クリア" not in sent[0]
+main_module.scan_ok = chart_context.scan_ok
 
 # 保留のときは銘柄コード・社名・理由を state に残す（サマリで使う）
 sent.clear()
@@ -398,13 +447,100 @@ state["mkt:7203"]["d"] = "2026-08-20"
 sent.clear()
 assert main_module.scan_market(after, state, dry_run=False)["hits"] == 1 and len(sent) == 1
 
+# 材料ニュースの枠で通知済み・保留中の銘柄は「材料ニュースなし」の枠に重ねて出さない
+sent.clear()
+state = {"n.pdf": {"d": "2026-08-31", "s": "notified", "c": "7203", "v": {}}}
+assert main_module.scan_market(after, state, dry_run=False)["hits"] == 0 and not sent
+assert "mkt:7203" not in state
+# frames は呼び出し可能でもよい（場中の遅延取得と同じ形）
+sent.clear()
+calls = []
+lazy = lambda: calls.append(1) or {"7203": make_df(today, last_vol_mult=0.05)}
+assert main_module.scan_market(after, {}, dry_run=False, frames=lazy)["hits"] == 1 and calls == [1]
+
 # 地合いが良好でなければ1件も出ない（scan_ok を素に戻して確認）
-import chart_context
 main_module.scan_ok = chart_context.scan_ok
 main_module.fetch_market = lambda: make_path((36000, 30000, 200))   # 25MA下向き
 state = {}
 assert main_module.scan_market(after, state, dry_run=False)["hits"] == 0
 main_module.fetch_market = lambda: make_path((30000, 36000, 200))
+
+# --- chart_scan(): 材料ニュース無しでも「もともとのチャート4条件」が揃えば通知 ---
+# 条件そのものは evaluate で検証済み。ここでは配管（出来高必須・材料枠の除外・上限・
+# クールダウン・本文）を見る
+main_module.load_universe = lambda: ["7203", "6758", "9984", "8035", "9999"]
+chart_frames = {
+    "7203": make_df(today, last_vol_mult=1.0),    # 按分後 5.5倍 → 通知
+    "6758": make_df(today, last_vol_mult=0.05),   # 出来高不足 → 落ちる（材料が無いので出来高は必須）
+    "9984": make_df(today, trend=-1.0),           # 下降トレンド → 落ちる
+    "8035": make_df(today, last_vol_mult=2.0),    # 条件は通るが材料ニュースの枠で保留中 → 除く
+    "9999": None,                                 # 株価データ無し
+}
+main_module.fetch_history_batch = lambda codes, period=None: chart_frames
+sent.clear()
+state = {"p.pdf": {"d": "2026-08-31", "s": "pending", "c": "8035", "n": "東エレ", "r": "x", "v": {}}}
+cstats = main_module.chart_scan(intraday, state, dry_run=False)
+assert cstats == {"scanned": 5, "nodata": 1, "hits": 1, "over": 0}, cstats
+assert len(sent) == 1
+body = sent[0]
+assert body.startswith("【チャート条件クリア（材料ニュースなし）】08/31 10:00\n地合い 日経平均 良好"), body[:80]
+assert "■ 7203 テスト株式会社" in body and "判定 チャート条件クリア（出来高 5.5倍・材料ニュースなし）" in body
+assert "ステージ " in body and "総合 " in body and "損切り目安" in body and "上値余地" in body
+assert "材料×チャート通知のチャート側と同じ条件" in body and "ほか " not in body
+assert all(c not in body for c in ("6758", "9984", "8035", "9999"))
+assert state["chart:7203"] == {"d": "2026-08-31", "s": "chart"} and "chart:8035" not in state
+
+# クールダウン中は再通知しない。明けたら再び通知する
+sent.clear()
+assert main_module.chart_scan(intraday, state, dry_run=False)["hits"] == 0 and not sent
+state["chart:7203"]["d"] = "2026-08-20"
+sent.clear()
+assert main_module.chart_scan(intraday, state, dry_run=False)["hits"] == 1 and len(sent) == 1
+
+# 上限を超えた分は出来高倍率の低い方から落とし、state に残さない（次回実行で再判定）
+config.CHART_MAX_HITS = 1
+sent.clear(); state = {}
+cstats = main_module.chart_scan(intraday, state, dry_run=False)
+assert cstats["hits"] == 1 and cstats["over"] == 1, cstats           # 7203(5.5倍) と 8035(11倍)
+assert "■ 8035" in sent[0] and "7203" not in sent[0]
+assert "ほか 1 銘柄も条件を満たしたが上位 1 件のみ通知" in sent[0]
+assert "chart:8035" in state and "chart:7203" not in state
+config.CHART_MAX_HITS = 10
+
+# 引け後の判定でも出来高条件は外さない（材料が無い銘柄は出来高の急増だけがシグナル）
+sent.clear()
+main_module.fetch_history_batch = lambda codes, period=None: {"6758": make_df(today, last_vol_mult=0.05)}
+assert main_module.chart_scan(after, {}, dry_run=False)["hits"] == 0 and not sent
+main_module.fetch_history_batch = lambda codes, period=None: {"7203": make_df(today, last_vol_mult=2.0)}
+sent.clear()                                               # 引け後は按分しないので1日で2倍の出来高が要る
+assert main_module.chart_scan(after, {}, dry_run=False)["hits"] == 1 and "翌営業日に持ち越す" in sent[0]
+
+# 出来高倍率はこの枠専用のしきい値で見る
+config.CHART_SCAN_VOLUME_RATIO = 20.0
+sent.clear()
+assert main_module.chart_scan(intraday, {}, dry_run=False)["hits"] == 0 and not sent     # 按分後 11倍 < 20
+config.CHART_SCAN_VOLUME_RATIO = 1.5
+
+# 地合い悪化を硬い条件にしていれば保留（材料×チャート通知と同じ扱い）
+config.MARKET_FILTER_HARD = True
+main_module.fetch_market = lambda: make_path((36000, 30000, 200))
+sent.clear()
+assert main_module.chart_scan(intraday, {}, dry_run=False)["hits"] == 0 and not sent
+config.MARKET_FILTER_HARD = False
+main_module.fetch_market = lambda: make_path((30000, 36000, 200))
+
+# frames は遅延取得の呼び出し可能オブジェクトでもよい（急落検知と1回の取得を共有する）
+calls = []
+lz = main_module.lazy_frames("1y")
+main_module.fetch_history_batch = lambda codes, period=None: calls.append(period) or {"7203": make_df(today, last_vol_mult=1.0)}
+assert lz() is lz() and calls == ["1y"]                    # 何度呼んでも取得は1回
+sent.clear()
+assert main_module.chart_scan(intraday, {}, dry_run=False, frames=lz)["hits"] == 1 and calls == ["1y"]
+main_module.fetch_history_batch = lambda codes: {
+    "7203": make_df(today, last_vol_mult=0.05),
+    "6758": make_df(today, trend=-1.0),
+    "9999": None,
+}
 
 # --- fmt_summary(): 0件でも「動いた」ことが分かる ---
 state = {
@@ -443,6 +579,17 @@ assert "TDnet 判定対象 463件 → 材料合致 2件" in txt             # di
 txt = main_module.fmt_summary(after, {}, {"targets": 0, "hits": 0, "mkt": ("", "")},
                               None, {"scanned": 0, "nodata": 0, "hits": 0, "idx": None})
 assert "急落検知 本日 0件・この実行は日経平均の当日値なしで判定不能" in txt
+
+# チャート条件スキャンも場中の各実行の分を1日ぶん合算する。記録は材料側の集計に混ざらない
+state["chart:7203"] = {"d": "2026-08-31", "s": "chart"}
+state["chart:6367"] = {"d": "2026-08-31", "s": "chart"}
+state["chart:8035"] = {"d": "2026-08-28", "s": "chart"}
+txt = main_module.fmt_summary(after, state, {"targets": 463, "hits": 1, "mkt": ("良好", "終値>25MA")},
+                              None, None, {"scanned": 225, "nodata": 0, "hits": 1, "over": 0})
+assert "チャート条件スキャン 対象 225銘柄 → 本日 2件（6367, 7203）" in txt and "chart:" not in txt
+assert "TDnet 判定対象 463件 → 材料合致 2件" in txt
+txt = main_module.fmt_summary(after, {}, {"targets": 0, "hits": 0, "mkt": ("", "")}, None)
+assert "チャート条件スキャン" not in txt
 
 # --- 急落検知（dip.py）：値動きゲート ---
 import dip as dip_module

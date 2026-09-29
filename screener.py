@@ -89,14 +89,17 @@ def bounce_pct(price: float, prev_close: float, low: float) -> float | None:
 
 
 def evaluate(df: pd.DataFrame, now: datetime, require_volume: bool | None = None,
-             require_above_ma25: bool = True) -> Screen:
+             require_above_ma25: bool = True, volume_ratio: float | None = None) -> Screen:
     """ネットワーク不要の純粋な判定ロジック（テスト用に分離）。
 
     require_volume: 出来高条件を課すか。None（既定）は「引け後は課さない」。
     require_above_ma25: 1 の「現在値 > 25MA」まで課すか。False なら 25MA > 75MA
         だけを見る。押し目からの反発（教材の追随期）は定義上いったん 25MA を
         割るので、そこを狙う教材スキャンでは False にする。
+    volume_ratio: 出来高条件の倍率。None なら config.VOLUME_RATIO。材料ニュース無しの
+        チャート条件スキャンは別の倍率（config.CHART_SCAN_VOLUME_RATIO）で見る。
     """
+    volume_ratio = volume_ratio or config.VOLUME_RATIO
     df = df.dropna(subset=["Close"])
     if len(df) < config.MIN_HISTORY:
         return Screen(False, [f"日足不足({len(df)}本)"])
@@ -129,8 +132,8 @@ def evaluate(df: pd.DataFrame, now: datetime, require_volume: bool | None = None
         frac = max(session_fraction(now), 0.15)      # 寄付き直後はノイズが大きいので最低15%扱い
         expected = avg20 * frac if avg20 > 0 else 0
         s.vol_ratio = float(vol.iloc[-1]) / expected if expected else 0.0
-        if require_volume and s.vol_ratio < config.VOLUME_RATIO:
-            s.reasons.append(f"出来高{s.vol_ratio:.1f}倍<{config.VOLUME_RATIO}")
+        if require_volume and s.vol_ratio < volume_ratio:
+            s.reasons.append(f"出来高{s.vol_ratio:.1f}倍<{volume_ratio:g}")
 
     if require_above_ma25 and not (s.price > s.ma25 > s.ma75):
         s.reasons.append("トレンド不成立(現在値>25MA>75MA)")

@@ -211,7 +211,8 @@ def dip_scan(now: datetime, items: list, state: dict, dry_run: bool, frames: dic
     """急落検知の本体。items は当日＋前営業日の TDnet 開示（run() と同じもの）。
 
     frames を渡すと（日次実行で教材スキャンが取った日足）それを使い回し、
-    ユニバースの日足を取り直さない。
+    ユニバースの日足を取り直さない。frames が呼び出し可能なら必要になった時点で呼ぶ
+    （指数の当日値が無くてスキップする実行では取りに行かない）。
     """
     today = now.date()
     today_iso = today.isoformat()
@@ -232,6 +233,8 @@ def dip_scan(now: datetime, items: list, state: dict, dry_run: bool, frames: dic
     print(f"急落検知 対象{len(targets)}銘柄（開示キーワード経由 {len(extra)}）"
           f"/ 日経平均 {ig:+.1f}% / 地合い {mkt[0] or '判定不能'}")
 
+    if callable(frames):                 # main.py の遅延取得（チャート条件スキャンと日足を共有する）
+        frames = frames() if codes else {}
     if frames is None:
         frames = fetch_history_batch(codes, period=config.DIP_HISTORY_PERIOD) if codes else {}
     else:
