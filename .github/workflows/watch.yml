@@ -17,6 +17,9 @@ on:
     # （--scan-market）と日次サマリ（--summary）を足す。日足が確定していないと
     # 意味が無いので場中には回さない。DAILY_CRON と同じ文字列にしておくこと。
     - cron: "35 7 * * 1-5"
+    # UTC 14:48 = JST 23:48。1日の最後（夜間の最終実行 23:33 の後）に1回だけ、
+    # その日の通知に出てきた用語の解説（--glossary）を送る。GLOSSARY_CRON と同じ文字列にしておくこと。
+    - cron: "48 14 * * 1-5"
   workflow_dispatch:
     inputs:
       stock_codes:
@@ -32,7 +35,11 @@ on:
         type: boolean
         default: false
       daily:
-        description: "引け後の日次処理（教材条件スキャン＋日次サマリ）も実行する"
+        description: "引け後の日次処理（教材条件スキャン＋日次サマリ＋通知銘柄の追跡・成績ページ更新）も実行する"
+        type: boolean
+        default: false
+      glossary:
+        description: "用語解説（その日の通知に出た用語）だけ送って終了"
         type: boolean
         default: false
 
@@ -78,8 +85,10 @@ jobs:
           TEST_NOTIFY: ${{ inputs.test_notify }}
           FORCE: ${{ inputs.force }}
           DAILY: ${{ inputs.daily }}
+          GLOSSARY: ${{ inputs.glossary }}
           SCHEDULE: ${{ github.event.schedule }}
           DAILY_CRON: "35 7 * * 1-5"
+          GLOSSARY_CRON: "48 14 * * 1-5"
         run: |
           # inputs.* は schedule 実行では空、API 経由の dispatch では "true"/"false" の
           # 文字列で届く。${{ inputs.x && 'a' || 'b' }} は空でない文字列を真と見なすので
@@ -92,6 +101,11 @@ jobs:
             python main.py --test-notify
             exit 0
           fi
+          # 1日の最後の用語解説。TDnet の監視は回さない（直前の 23:33 の実行で済んでいる）
+          if [ "${GLOSSARY}" = "true" ] || [ "${SCHEDULE}" = "${GLOSSARY_CRON}" ]; then
+            python main.py --glossary
+            exit 0
+          fi
           # --chart-scan（材料ニュース無しのチャート条件）と --dip-scan（急落検知）は常に付ける。
           # 16:00 以降の実行では main.py 側で回さない
           # （引けの判定は日次実行が --scan-market の日足を使い回して行う）
@@ -100,7 +114,8 @@ jobs:
             opts="${opts} --force"
           fi
           if [ "${DAILY}" = "true" ] || [ "${SCHEDULE}" = "${DAILY_CRON}" ]; then
-            opts="${opts} --scan-market --summary"
+            # --track: 通知した銘柄の「その後」を更新し、成績ページ docs/index.html を作り直す
+            opts="${opts} --scan-market --summary --track"
           fi
           echo "python main.py${opts}"
           python main.py ${opts}
@@ -111,7 +126,8 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # names.json = TDnet から覚えた日本語の社名。初回実行までは存在しない
-          for f in state/seen.json state/names.json; do
+          # track.json / docs = 通知した銘柄の追跡と成績ページ（GitHub Pages で公開）
+          for f in state/seen.json state/names.json state/track.json docs/index.html docs/.nojekyll; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if git diff --cached --quiet; then

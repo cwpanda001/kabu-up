@@ -207,12 +207,24 @@ def fetch_history_batch(code4s: list[str], chunk: int | None = None,
     return out
 
 
+_MARKET_CACHE: dict = {}
+
+
 def fetch_market():
-    """地合い判定用の指数日足。失敗しても None で続行（地合い行が出ないだけ）。"""
+    """地合い判定用の指数日足。失敗しても None で続行（地合い行が出ないだけ）。
+
+    1回の実行の中では材料判定・各スキャン・判断数値（対日経）が同じ指数を使うので、
+    取れた日足は使い回す（失敗は覚えず、次の呼び出しで取り直す）。
+    """
+    if "df" in _MARKET_CACHE:
+        return _MARKET_CACHE["df"]
     import yfinance as yf
     try:
         df = yf.Ticker(config.MARKET_INDEX).history(period="1y", interval="1d", auto_adjust=False)
-        return df if df is not None and len(df) else None
+        if df is not None and len(df):
+            _MARKET_CACHE["df"] = df
+            return df
+        return None
     except Exception as e:
         print(f"[screener] market fetch error: {e}")
         return None

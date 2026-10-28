@@ -11,6 +11,8 @@
   python main.py --chart-scan          # 材料ニュース無しでも「もともとのチャート4条件」が揃った銘柄を通知（場中の毎回実行に同居）
   python main.py --dip-scan            # 悪材料なし／一過性悪材料の急落を通知（場中の毎回実行に同居）
   python main.py --summary             # その実行の結果を日次サマリとして通知
+  python main.py --glossary            # その日の通知に出た用語を中学生向けに解説（1日の最後に1回）
+  python main.py --track               # 通知した銘柄の「その後」を更新して成績ページ docs/index.html を作る（日次実行に同居）
 
 「株が上がりそう」と言える条件の組み合わせは4つあり、どれか1つが揃えば通知する:
   1. 材料×チャート  : 好材料の開示 × もともとのチャート4条件（run()）
@@ -23,6 +25,8 @@ pending = 材料はポジティブだがチャート条件も教材条件も未�
 mkt:銘柄コード   = 教材スキャンで通知済み（SCAN_COOLDOWN_DAYS のあいだ再通知しない）。
 chart:銘柄コード = チャート条件スキャンで通知済み（CHART_COOLDOWN_DAYS のあいだ再通知しない）。
 dip:銘柄コード   = 急落検知で通知済み（DIP_COOLDOWN_DAYS のあいだ再通知しない）。
+glossary:日付    = その日の通知に出た用語（用語解説で送ったら sent を付ける）。
+通知した銘柄の「その後」は state/track.json に別で持つ（track.py）。
 """
 import argparse
 import json
@@ -32,12 +36,16 @@ from datetime import date, datetime
 from datetime import time as dtime
 
 import config
+import glossary
 import names
+import notify
+import track
 from chart_context import (analyze, context_lines, earnings_note, is_trading_day,
                            market_condition, prev_trading_day, room_line, scan_ok, stance,
                            trading_days_ago, yen)
 from dip import dip_scan
 from judge import judge
+from metrics import decision_lines
 from nikkei225 import load_universe
 from notify import send
 from screener import (JST, evaluate, fetch_history, fetch_history_batch, fetch_market,
@@ -54,7 +62,7 @@ KEEP_DAYS = max(3, config.SCAN_COOLDOWN_DAYS, config.DIP_COOLDOWN_DAYS, config.C
 # （引けの判定は 16:35 の日次実行が --scan-market と一緒に行う）
 DIP_SCAN_UNTIL = dtime(16, 0)
 # 材料ニュース以外の枠（教材条件／チャート条件／急落）が state に残す記録の種別。日次サマリの材料側の集計から除く
-_SCAN_STATUSES = ("market", "chart", "dip")
+_SCAN_STATUSES = ("market", "chart", "dip", "glossary")
 
 
 def load_state() -> dict:
@@ -144,11 +152,13 @@ def _chart_lines(s) -> list[str]:
 
 
 def fmt_hit(items: list[Disclosure], v: dict, s, ctx, earn: str,
-            mkt_label: str, today: str, chart_note: str = "") -> str:
+            mkt_label: str, today: str, chart_note: str = "",
+            extra: list[str] | None = None) -> str:
     """材料ヒット1銘柄分。items は同じ銘柄の該当開示（複数ありうる）。
 
     chart_note が空でなければ「材料×教材条件」の通知（もともとのチャート4条件は
     未達だが教材条件が揃った）で、未達だった条件を判定行に併記する。
+    extra は判断数値の行（metrics.decision_lines）。
     """
     label = "／".join(v["labels"])
     if v.get("ai"):
@@ -165,6 +175,7 @@ def fmt_hit(items: list[Disclosure], v: dict, s, ctx, earn: str,
     lines += _chart_lines(s)
     lines += context_lines(ctx)
     lines.append(room_line(ctx, s.price, s.stop))
+    lines += extra or []
     if earn:
         lines.append(f" {earn}")
     lines += [
@@ -176,12 +187,13 @@ def fmt_hit(items: list[Disclosure], v: dict, s, ctx, earn: str,
 
 
 def fmt_scan_hit(code4: str, name: str, s, ctx, earn: str, mkt_label: str,
-                 verdict: str) -> str:
+                 verdict: str, extra: list[str] | None = None) -> str:
     """スキャン（教材条件／チャート条件）のヒット1銘柄分（材料ニュースは無い）。"""
     lines = [f"■ {code4} {name}".rstrip(), f" 判定 {verdict}"]
     lines += _chart_lines(s)
     lines += context_lines(ctx)
     lines.append(room_line(ctx, s.price, s.stop))
+    lines += extra or []
     if earn:
         lines.append(f" {earn}")
     lines += [
@@ -191,15 +203,17 @@ def fmt_scan_hit(code4: str, name: str, s, ctx, earn: str, mkt_label: str,
     return "\n".join(l for l in lines if l)
 
 
-def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> dict:
-    """TDnet の材料判定 → チャート条件 → 通知。集計値を返す。"""
+def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool,
+        trk: dict | None = None) -> dict:
+    """TDnet の材料判定 → チャート条件 → 通知。集計値を返す。trk は追跡の記録先（track.py）。"""
     today = now.date().isoformat()
     # 前営業日分は 15:00 以降（引け後開示）のみ持ち越して再判定する
     targets = [it for it in items if it.date == today or it.time >= "15:00"]
 
-    mkt = ("", "")
+    mkt, mkt_df = ("", ""), None
     if targets:
-        mkt = market_condition(fetch_market())
+        mkt_df = fetch_market()
+        mkt = market_condition(mkt_df)
         if mkt[0]:
             print(f"地合い 日経平均 {mkt[0]}（{mkt[1]}）")
 
@@ -263,8 +277,12 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> d
         tag = "HIT" if not chart_note else "HIT*"
         print(f"[{tag}]  {code4} {name}: {v['labels']} 出来高{s.vol_ratio:.1f}倍 "
               f"gap{s.gap_pct:+.1f}% {ctx.stage}" + (f"（教材条件で通知: {chart_note}）" if chart_note else ""))
-        hits.append((its, v, s, ctx, earn, chart_note))
+        pro = decision_lines(code4, df, s.price, s.stop, ctx.resistance, idx_df=mkt_df)
+        hits.append((its, v, s, ctx, earn, chart_note, pro))
         mark("notified")
+        if trk is not None:
+            track.record(trk, "soft" if chart_note else "strict", code4, name, now, s.price, s.stop,
+                         ctx.resistance, "／".join(v["labels"]), next((it.url for it in its if it.url), ""))
 
     strict = [h for h in hits if not h[5]]
     soft_hits = [h for h in hits if h[5]]
@@ -276,8 +294,8 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> d
         if mkt[0]:
             head += f"\n地合い 日経平均 {mkt[0]}（{mkt[1]}）"
         body = [head]
-        body += [fmt_hit(its, v, s, ctx, earn, mkt[0], today, note)
-                 for its, v, s, ctx, earn, note in lane]
+        body += [fmt_hit(its, v, s, ctx, earn, mkt[0], today, note, pro)
+                 for its, v, s, ctx, earn, note, pro in lane]
         if lane is soft_hits:
             body.append("※もともとのチャート条件（出来高1.5倍・現在値>25MA など）は未達だが、教材条件\n"
                         "　（上昇トレンド・追随期・25MA上向き・地合い良好）が揃った銘柄。未達の条件は「条件」行に併記")
@@ -289,7 +307,7 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool) -> d
 
 
 def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = None,
-                frames: dict | None = None) -> dict:
+                frames: dict | None = None, trk: dict | None = None) -> dict:
     """材料ニュースが無くても、教材条件を満点で満たす銘柄を拾う（引け後の日次スキャン）。
 
     通知条件は「上昇トレンド・追随期・25MA上向き・地合い良好」の4点（chart_context.scan_ok）。
@@ -334,8 +352,12 @@ def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = N
         room = "新高値" if ctx.new_high else (
             "余地不明" if ctx.room_pct is None else f"余地{ctx.room_pct:+.1f}%")
         print(f"[MKT]  {code4}: {ctx.stage} {room} gap{s.gap_pct:+.1f}% RSI{s.rsi:.0f}")
-        hits.append((code4, fetch_name(code4), s, ctx, earn))
+        hits.append((code4, fetch_name(code4), s, ctx, earn,
+                     decision_lines(code4, df, s.price, s.stop, ctx.resistance, idx_df=fetch_market())))
         state[f"mkt:{code4}"] = {"d": now.date().isoformat(), "s": "market"}
+        if trk is not None:
+            track.record(trk, "market", code4, hits[-1][1], now, s.price, s.stop, ctx.resistance,
+                         "教材条件クリア（追随期）")
 
     if nodata:
         print(f"[scan] 株価データ無し {nodata} 銘柄（コード更新漏れの可能性）")
@@ -347,8 +369,8 @@ def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = N
             head += f"\n地合い 日経平均 {mkt[0]}（{mkt[1]}）"
         body = [head]
         body += [fmt_scan_hit(c, n, s, ctx, earn, mkt[0],
-                              "教材条件クリア（追随期の押し目反発・材料ニュースなし）")
-                 for c, n, s, ctx, earn in hits]
+                              "教材条件クリア（追随期の押し目反発・材料ニュースなし）", pro)
+                 for c, n, s, ctx, earn, pro in hits]
         body.append("※教材条件のみで抽出。材料ニュースは出ていないので、値動きの理由は各自で確認。\n"
                     "　上値余地は合否に使っていない（数値を見て取りに行くか判断する）")
         send("\n\n".join(body), dry_run=dry_run)
@@ -356,7 +378,7 @@ def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = N
 
 
 def chart_scan(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = None,
-               frames=None) -> dict:
+               frames=None, trk: dict | None = None) -> dict:
     """材料ニュースが無くても、もともとのチャート4条件が揃った銘柄を拾う（場中の毎回実行に同居）。
 
     条件は材料×チャート通知のチャート側そのもの: 現在値>25MA>75MA ／ RSI<70 ／
@@ -402,8 +424,12 @@ def chart_scan(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = No
         ctx = analyze(df)
         earn = earnings_note(next_earnings_date(code4), now.date())
         print(f"[CHT]  {code4}: 出来高{s.vol_ratio:.1f}倍 gap{s.gap_pct:+.1f}% RSI{s.rsi:.0f} {ctx.stage}")
-        hits.append((code4, fetch_name(code4), s, ctx, earn))
+        hits.append((code4, fetch_name(code4), s, ctx, earn,
+                     decision_lines(code4, df, s.price, s.stop, ctx.resistance, idx_df=fetch_market())))
         state[f"chart:{code4}"] = {"d": now.date().isoformat(), "s": "chart"}
+        if trk is not None:
+            track.record(trk, "chart", code4, hits[-1][1], now, s.price, s.stop, ctx.resistance,
+                         f"チャート条件クリア（出来高 {s.vol_ratio:.1f}倍）")
     over = max(0, len(cands) - len(hits))
 
     if nodata:
@@ -414,8 +440,8 @@ def chart_scan(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = No
             head += f"\n地合い 日経平均 {mkt[0]}（{mkt[1]}）"
         body = [head]
         body += [fmt_scan_hit(c, n, s, ctx, earn, mkt[0],
-                              f"チャート条件クリア（出来高 {s.vol_ratio:.1f}倍・材料ニュースなし）")
-                 for c, n, s, ctx, earn in hits]
+                              f"チャート条件クリア（出来高 {s.vol_ratio:.1f}倍・材料ニュースなし）", pro)
+                 for c, n, s, ctx, earn, pro in hits]
         foot = (f"※現在値>25MA>75MA・RSI<{config.RSI_MAX}・出来高≥{config.CHART_SCAN_VOLUME_RATIO:g}倍・"
                 f"ギャップ≤+{config.MAX_GAP_PCT:g}% の銘柄（材料×チャート通知のチャート側と同じ条件）。\n"
                 "　材料ニュースは出ていないので、出来高が増えた理由は各自で確認。総合（教材条件）も見て判断")
@@ -429,7 +455,8 @@ def chart_scan(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = No
 
 
 def fmt_summary(now: datetime, state: dict, tdnet: dict, market: dict | None,
-                dip: dict | None = None, chart: dict | None = None) -> str:
+                dip: dict | None = None, chart: dict | None = None,
+                trk: dict | None = None) -> str:
     """その日の稼働結果。0件でも送るので「動いているのか」が分かる。"""
     today = now.date().isoformat()
     mine = [v for v in state.values() if v.get("s") not in _SCAN_STATUSES]
@@ -466,6 +493,11 @@ def fmt_summary(now: datetime, state: dict, tdnet: dict, market: dict | None,
         if dip.get("idx") is None:
             line += "・この実行は日経平均の当日値なしで判定不能"
         lines.append(line)
+    if trk is not None:
+        # 成績の本体は通知に混ぜず、ページ（URL）で見る。ここは行き先の1行だけ
+        tl = track.summary_line(trk)
+        if tl:
+            lines.append(tl)
 
     if pend:
         lines.append("")
@@ -499,6 +531,10 @@ def main() -> None:
                     help="悪材料なし／一過性悪材料の急落を通知（場中の実行に同居。16:00以降は --scan-market か --force が無ければ回さない）")
     ap.add_argument("--summary", action="store_true",
                     help="その実行の結果を日次サマリとして通知（0件でも送る）")
+    ap.add_argument("--glossary", action="store_true",
+                    help="その日の通知に出た用語の解説を送って終了（1日の最後の実行用）")
+    ap.add_argument("--track", action="store_true",
+                    help="通知した銘柄のその後を更新して成績ページ（docs/index.html）を作る（引け後の日次実行用）")
     args = ap.parse_args()
 
     now = datetime.now(JST)
@@ -518,6 +554,19 @@ def main() -> None:
             names.save_cache()
         print(f"銘柄状況を送信した: {args.stock}")
         return
+    if args.glossary:
+        # 休場日でも、前日までに貯まって未送信の用語があれば送る（cron が遅れて日付をまたいだ場合）。
+        # 通知が1件も無かった日の「基本用語」は営業日だけ送る
+        state = {} if args.no_state else load_state()
+        text = glossary.build(state, now, allow_fallback=args.force or is_trading_day(today))
+        if text:
+            send(text, dry_run=args.dry_run)
+            print("用語解説を送信した")
+        else:
+            print("用語解説: 送るものなし")
+        if not args.no_state:
+            save_state(state, today)
+        return
     if not args.sample and not args.force and not is_trading_day(today):
         print(f"{today} は休場日。終了")
         return
@@ -531,29 +580,43 @@ def main() -> None:
     names.learn(items)   # 通知の見出しを日本語にするための社名を覚える
 
     state = {} if args.no_state else load_state()
-    tdnet = run(items, now, state, args.dry_run)
+    trk = {} if args.no_state else track.load()
+    tdnet = run(items, now, state, args.dry_run, trk)
     market = chart = dip = None
     if args.scan_market:
-        frames = fetch_history_batch(load_universe())   # チャート条件スキャン・急落検知と共有する
-        market = scan_market(now, state, args.dry_run, tdnet["mkt"], frames)
+        frames = fetch_history_batch(load_universe())   # チャート条件スキャン・急落検知・追跡と共有する
+        market = scan_market(now, state, args.dry_run, tdnet["mkt"], frames, trk)
     else:
         # 場中は短い期間の日足で足りる。必要になった時点で1回だけ取る（両スキャンで共有）
         frames = lazy_frames(config.DIP_HISTORY_PERIOD)
     in_session = now.time() < DIP_SCAN_UNTIL or args.scan_market or args.force
     if args.chart_scan:
         if in_session:
-            chart = chart_scan(now, state, args.dry_run, tdnet["mkt"], frames)
+            chart = chart_scan(now, state, args.dry_run, tdnet["mkt"], frames, trk)
         else:
             print(f"{now:%H:%M} は引け後のためチャート条件スキャンはスキップ（引けの判定は日次実行で行う）")
     if args.dip_scan:
         if in_session:
-            dip = dip_scan(now, items, state, args.dry_run, frames)
+            dip = dip_scan(now, items, state, args.dry_run, frames, trk)
         else:
             print(f"{now:%H:%M} は引け後のため急落検知はスキップ（引けの判定は日次実行で行う）")
+    if args.track:
+        # 通知の翌営業日以降の終値で「その後」を埋める。ユニバースの日足は各スキャンと共有し、
+        # TDnet 由来の銘柄だけ個別に取る
+        ts = track.update(trk, frames, fetch=lambda c: fetch_history(c, period="6mo"), today=today)
+        print(f"追跡 更新 {ts['updated']}/{ts['checked']}件（個別取得 {ts['fetched']}・データ無し {ts['nodata']}）")
+        trk = track.prune(trk, today)
+        if not args.no_state:
+            track.write_page(trk, now)
+            print(f"成績ページを更新した: {track.PAGE_PATH}")
     if args.summary:
-        send(fmt_summary(now, state, tdnet, market, dip, chart), dry_run=args.dry_run)
+        send(fmt_summary(now, state, tdnet, market, dip, chart, trk if args.track else None),
+             dry_run=args.dry_run)
+    # この実行で送った通知に出てきた用語を貯める（1日の最後に --glossary でまとめて解説する）
+    glossary.record(state, notify.SENT, today)
     if not args.no_state:
         save_state(state, today)
+        track.save(trk)
         names.save_cache()
     print(f"通知 {tdnet['hits']} 件 / 状態 {len(state)} 件")
 

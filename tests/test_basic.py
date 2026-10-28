@@ -11,8 +11,14 @@ import notify as notify_module
 from tdnet import parse_list
 from judge import keyword_judge, pdf_direction
 from screener import evaluate, session_fraction
+import metrics
 
 JST = ZoneInfo("Asia/Tokyo")
+
+# 判断数値の PER・PBR 等は yfinance の銘柄情報。テストでは固定値に差し替える（ネット不要）
+VALUATION = {"marketCap": 4.6e12, "trailingPE": 12.3, "priceToBook": 1.1,
+             "dividendRate": 80.0, "returnOnEquity": 0.095}
+metrics.fetch_valuation = lambda c: VALUATION
 
 # --- TDnet パース ---
 items = parse_list(open("sample/tdnet_sample.html", encoding="utf-8").read(), date(2026, 8, 30))
@@ -250,6 +256,8 @@ assert "【銘柄状況】08/31 10:00" in rep
 assert "地合い 日経平均 良好" in rep
 assert "■ 7203 テスト株式会社" in rep and "〔上方修正〕" in rep
 assert "ステージ " in rep and "総合 " in rep
+assert " 判断数値 売買代金 " in rep and "対日経 " in rep and " 指標 時価総額 4.6兆円" in rep
+assert " 100株 必要資金 " in rep
 assert "■ xxxx\n 無効なコード" in rep
 assert rep.rstrip().endswith("※判断材料であり売買の推奨ではない")
 
@@ -345,15 +353,25 @@ items = [disc("a.pdf", "7203", "トヨタ", "自己株式の取得に関する�
          disc("b.pdf", "7203", "トヨタ", "業務提携に関するお知らせ"),
          disc("c.pdf", "6758", "ソニー", "株式分割に関するお知らせ")]
 state = {}
-stats = main_module.run(items, intraday, state, dry_run=False)
+trk_run = {}
+stats = main_module.run(items, intraday, state, dry_run=False, trk=trk_run)
 assert stats["hits"] == 2 and stats["targets"] == 3, stats
 assert len(sent) == 1
 body = sent[0]
+# 通知した銘柄は追跡に登録される（枠 strict・通知時の株価・損切り・上値抵抗・PDF）
+assert sorted(trk_run) == ["2026-08-31:strict:6758", "2026-08-31:strict:7203"], trk_run
+assert trk_run["2026-08-31:strict:7203"]["v"] == "自己株式の取得／業務提携"
+assert trk_run["2026-08-31:strict:7203"]["url"] == "https://example.invalid/a.pdf"
+assert trk_run["2026-08-31:strict:7203"]["p0"] > 0 and trk_run["2026-08-31:strict:7203"]["stop"] > 0
 assert body.count("■ 7203") == 1, body                      # 同じ銘柄が二重に並ばない
 assert "■ 7203 トヨタ自動車" in body                          # TDnet の略称ではなくフル社名で出す
 assert "自己株式の取得／業務提携" in body                     # ラベルはまとめて表記
 assert body.count("開示 10:00｜") == 3                       # 開示行は3件ぶん残る
 assert "https://example.invalid/a.pdf" in body and "https://example.invalid/b.pdf" in body
+# 判断数値（売買代金・乖離・対日経・52週高値／PER等／100株あたりの損益）を併記する
+assert body.count(" 判断数値 売買代金 ") == 2 and "25MA乖離 " in body and "対日経 " in body
+assert body.count(" 指標 時価総額 4.6兆円 ／ PER 12.3倍 ／ PBR 1.10倍") == 2
+assert body.count(" 100株 必要資金 ") == 2 and "損切りで −" in body
 assert all(state[k]["s"] == "notified" for k in ("a.pdf", "b.pdf", "c.pdf"))
 assert state["a.pdf"]["c"] == "7203" and state["c.pdf"]["c"] == "6758"   # 通知済みでもコードは残す
 assert "soft" in stats and stats["soft"] == 0
@@ -374,6 +392,9 @@ stats = main_module.run(items, intraday, state, dry_run=False)
 assert stats["hits"] == 2 and stats["soft"] == 2, stats
 assert len(sent) == 1 and sent[0].startswith("【材料×教材条件】08/31 10:00"), sent[0][:60]
 body = sent[0]
+trk_soft = {}
+main_module.run(items, intraday, {}, dry_run=False, trk=trk_soft)
+assert all(k.split(":")[1] == "soft" for k in trk_soft) and len(trk_soft) == 2, trk_soft
 assert "■ 7203 トヨタ自動車" in body and "■ 6758" in body
 assert " 判定 自己株式の取得／業務提携" in body
 assert "条件 教材条件クリア（追随期の押し目反発）／ チャート条件は未達: トレンド不成立(現在値>25MA>75MA)" in body
@@ -437,6 +458,7 @@ assert "【教材条件クリア（材料ニュースなし）】" in body
 assert "■ 7203 テスト株式会社" in body and "教材条件クリア（追随期の押し目反発" in body
 assert "損切り目安" in body and "6758" not in body
 assert "上値余地" in body and "リスクリワード" in body       # 余地は数値で出す
+assert " 判断数値 " in body and " 指標 " in body and " 100株 必要資金 " in body
 assert state["mkt:7203"] == {"d": "2026-08-31", "s": "market"}
 
 # クールダウン中は再通知しない
@@ -702,6 +724,7 @@ assert "■ 4000 テスト株式会社" in sent[0] and "不正アクセス" in s
 assert "https://example.invalid/t.pdf" in sent[0] and "7203" not in sent[0]
 assert sent[1].startswith("【急落検知（悪材料なし）】08/31 10:00")
 assert "■ 7203 テスト株式会社" in sent[1] and "必ず戻る保証は無い" in sent[1]
+assert " 100株 必要資金 " in sent[1] and "戻り目標で +" in sent[1]   # 急落は前日終値までの戻りで計算
 assert all(c not in sent[1] for c in ("6758", "9984", "8035", "9999", "4000"))
 assert state["dip:7203"] == {"d": "2026-08-31", "s": "dip"} and "dip:4000" in state
 assert "dip:6758" not in state and "dip:8035" not in state
@@ -763,6 +786,8 @@ assert all(nikkei225.NAMES.values()), [c for c, n in nikkei225.NAMES.items() if 
 
 # --- 社名の解決（names.py） ---
 import names as names_module
+# 本番の state/names.json（実行のたびに社名を覚える）に左右されないよう、キャッシュは読まない
+names_module.OVERRIDE_PATH, names_module.CACHE_PATH = "/nonexistent.txt", "/nonexistent.json"
 names_module.reset()
 assert names_module.jp_name("7267") == "本田技研工業"      # 同梱の対応表
 assert names_module.jp_name("72670") == "本田技研工業"     # TDnet式の5桁も4桁に揃える
@@ -817,6 +842,172 @@ sys.modules["yfinance"] = types.SimpleNamespace(
     Ticker=lambda t: types.SimpleNamespace(info={"longName": "Some Corp"}))
 assert si.fetch_name("130A") == "Some Corp"
 del sys.modules["yfinance"]
+
+# --- 判断数値（metrics.py） ---
+idx_flat = make_path((30000, 30000, 200))
+mdf = make_df(today, last_vol_mult=1.0)
+pl = metrics.pro_line(mdf, idx_flat)
+assert pl.startswith(" 判断数値 売買代金 ") and "/日" in pl and "25MA乖離 " in pl
+assert "対日経 " in pl and f"（{config.RS_DAYS}日）" in pl and "52週高値" in pl
+mine20 = (mdf["Close"].iloc[-1] / mdf["Close"].iloc[-21] - 1) * 100
+assert f"対日経 {mine20:+.1f}pt" in pl, pl                  # 指数が横ばいなら銘柄の騰落率そのもの
+assert "対日経" not in metrics.pro_line(mdf)                 # 指数が取れなければその項目だけ出さない
+assert metrics.pro_line(mdf.iloc[:10]) == ""                 # 日足不足
+thin = mdf.copy(); thin["Volume"] = 10.0                     # 売買代金 1億円未満 → 流動性の警告
+assert "⚠流動性低" in metrics.pro_line(thin) and "⚠流動性低" not in pl
+top = mdf.copy(); top.loc[top.index[-1], "Close"] = float(top["High"].max()) * 1.01
+assert "52週高値 更新中" in metrics.pro_line(top)
+
+v = metrics.valuation_line(VALUATION, 2000.0)
+assert v == " 指標 時価総額 4.6兆円 ／ PER 12.3倍 ／ PBR 1.10倍 ／ 配当利回り 4.00% ／ ROE 9.5%", v
+assert metrics.valuation_line({}, 2000.0) == ""
+# PER・PBR が直接取れないときは EPS・BPS から計算する。0 や NaN は出さない
+assert metrics.valuation_line({"trailingEps": 100.0, "bookValue": 2000.0, "trailingPE": float("nan"),
+                               "marketCap": 0}, 2000.0) == " 指標 PER 20.0倍 ／ PBR 1.00倍"
+assert "時価総額 850億円" in metrics.valuation_line({"marketCap": 8.5e10}, 1.0)
+assert metrics.lot_line(2850.0, 2720.0, 3080.0) == \
+    " 100株 必要資金 28.5万円 ／ 損切りで −1.3万円 ／ 利確目安で +2.3万円"
+assert metrics.lot_line(50.0, 45.0, None) == " 100株 必要資金 5,000円 ／ 損切りで −500円"
+assert metrics.lot_line(0, 0) == ""
+assert metrics.decision_lines("7203", mdf, 1000.0, 950.0, info={}) == \
+    [metrics.pro_line(mdf), metrics.lot_line(1000.0, 950.0)]   # 取れない行は詰める
+
+# --- 用語解説（glossary.py） ---
+import glossary
+assert len(set(glossary.TERM_NAMES)) == len(glossary.TERM_NAMES)        # 用語名の重複なし
+assert all(len(t) <= 90 for _, _, t in glossary.TERMS)                  # 解説は短く
+found = glossary.terms_in(["■ 7203 トヨタ\n RSI 62 ／ 出来高 3.7倍\n ステージ 追随期", "リスクリワード 2.0"])
+assert found == ["RSI", "出来高", "ステージ", "追随期", "リスクリワード"], found   # TERMS の並び順
+assert glossary.terms_in("") == []
+
+gstate = {}
+day = date(2026, 8, 31)
+glossary.record(gstate, ["RSI 62"], day)                       # 場中の実行
+glossary.record(gstate, ["RSI 50 ／ PER 12.3倍"], day)         # 夜間の実行。重複は足さない
+assert gstate["glossary:2026-08-31"] == {"d": "2026-08-31", "s": "glossary", "t": ["RSI", "PER"]}
+assert glossary.record(gstate, "関係ない文", day) == [] and len(gstate) == 1
+gnow = datetime(2026, 8, 31, 23, 48, tzinfo=JST)
+msg = glossary.build(gstate, gnow)
+assert msg.startswith("【今日の用語解説】08/31") and "2個" in msg
+assert "■ RSI\n 最近の" in msg and "■ PER\n" in msg and msg.index("■ RSI") < msg.index("■ PER")
+assert gstate["glossary:2026-08-31"]["sent"] is True
+assert glossary.build(gstate, gnow) == ""                      # 同じ日に二度は送らない
+# 送った後に通知が出たら、次の用語解説で送り直す
+glossary.record(gstate, ["ATR"], day)
+assert gstate["glossary:2026-08-31"]["t"] == ["ATR"] and not gstate["glossary:2026-08-31"].get("sent")
+# cron が遅れて日付をまたいでも、未送信の日のぶんをまとめて送る
+glossary.record(gstate, ["PBR"], date(2026, 8, 28))
+msg = glossary.build(gstate, datetime(2026, 9, 1, 0, 5, tzinfo=JST))
+assert "■ ATR" in msg and "■ PBR" in msg and not glossary.pending(gstate)
+# 通知が1件も無かった日は基本用語を日替わりで解説する。手動で2回流しても1回だけ
+fb = {}
+msg = glossary.build(fb, gnow)
+assert "通知がなかったので" in msg and msg.count("\n■ ") == config.GLOSSARY_FALLBACK
+assert glossary.fallback_terms(day) != glossary.fallback_terms(date(2026, 9, 1))
+assert glossary.build(fb, gnow) == ""
+assert glossary.build({}, gnow, allow_fallback=False) == ""
+# 用語解説の記録は日次サマリの集計（材料ニュースの件数・保留）に混ざらない
+summ = main_module.fmt_summary(after, {"glossary:2026-08-31": {"d": "2026-08-31", "s": "glossary", "t": ["RSI"]}},
+                               {"targets": 0, "hits": 0, "mkt": ("", "")}, None)
+assert "通知 0件" in summ and "保留中の銘柄は無し" in summ
+# 実際の通知文に出る言葉は解説が付く（主要な行の見出し語を取りこぼさない）
+for w in ("地合い", "25MA", "RSI", "出来高", "ステージ", "支持線", "上値抵抗", "上値余地", "リスクリワード",
+          "損切り", "ATR", "売買代金", "25MA乖離", "対日経", "52週高値", "PER", "PBR", "配当利回り", "ROE",
+          "必要資金", "戻り率", "PTS"):
+    assert glossary.terms_in(w), w
+
+# --- 通知銘柄の追跡（track.py） ---
+import track
+trk = {}
+tnow = datetime(2026, 8, 3, 10, 0, tzinfo=JST)
+assert track.record(trk, "strict", "7203", "トヨタ自動車", tnow, 2850.0, 2720.0, 3080.0, "上方修正", "https://x/a.pdf")
+assert not track.record(trk, "strict", "7203", "トヨタ自動車", tnow, 2851.0, 2720.0, 3080.0)   # 同日・同枠は1回
+assert track.record(trk, "dip", "7203", "トヨタ自動車", tnow, 2850.0, 2700.0, 3000.0)          # 枠が違えば別
+assert not track.record(trk, "chart", "6758", "ソニー", tnow, 0.0, None, None)                  # 株価なしは登録しない
+e = trk["2026-08-03:strict:7203"]
+assert e["p0"] == 2850.0 and e["stop"] == 2720.0 and e["target"] == 3080.0 and e["r"] == {}
+
+# 通知日の翌日から 20 営業日ぶんの終値・高値・安値を埋める
+tidx = pd.bdate_range(start="2026-07-01", end="2026-09-05", tz="Asia/Tokyo")
+tclose = pd.Series(2850.0, index=tidx)
+after_pos = tidx.get_indexer([pd.Timestamp("2026-08-03", tz="Asia/Tokyo")])[0] + 1
+tclose.iloc[after_pos:] = [2900 + 10 * i for i in range(len(tidx) - after_pos)]     # 翌日から上昇
+tdf = pd.DataFrame({"Open": tclose, "High": tclose * 1.01, "Low": tclose * 0.99, "Close": tclose,
+                    "Volume": 1e6}, index=tidx)
+r = track.progress(e, tdf)
+assert r["1"] == 2900.0 and r["5"] == 2940.0 and r["20"] == 3090.0 and r["done"] and r["days"] == 20, r
+assert r["hi"] == round(3090.0 * 1.01, 2) and r["lo"] == round(2900 * 0.99, 2)
+r_short = track.progress(e, tdf.iloc[: after_pos + 3])          # まだ3日ぶんしか無い
+assert r_short["days"] == 3 and "5" not in r_short and not r_short["done"] and r_short["last"] == 2920.0
+assert track.progress(e, tdf.iloc[:after_pos]) == {"days": 0, "done": False}   # 翌日の足がまだ無い
+assert track.progress({"d": "2026-12-01"}, tdf) == {}                           # 通知日が日足の後
+
+# update(): ユニバースの日足を使い、無い銘柄は fetch で取る（上限あり）。当日分は触らない
+trk2 = {}
+track.record(trk2, "strict", "7203", "A", tnow, 2850.0, 2720.0, 3080.0)
+track.record(trk2, "market", "6758", "B", tnow, 2850.0, 2720.0, 3080.0)
+track.record(trk2, "chart", "9999", "C", tnow, 2850.0, 2720.0, 3080.0)
+track.record(trk2, "dip", "8035", "D", datetime(2026, 9, 1, 10, 0, tzinfo=JST), 2850.0, 2720.0, 3080.0)
+fetched = []
+def fake_fetch(c):
+    fetched.append(c)
+    return tdf if c == "6758" else None
+st = track.update(trk2, {"7203": tdf}, fetch=fake_fetch, today=date(2026, 9, 1))
+assert st == {"checked": 3, "updated": 2, "fetched": 2, "nodata": 1}, st
+assert fetched == ["6758", "9999"] and trk2["2026-08-03:chart:9999"]["r"] == {}
+assert trk2["2026-08-03:strict:7203"]["r"]["done"] and trk2["2026-08-03:market:6758"]["r"]["done"]
+assert trk2["2026-09-01:dip:8035"]["r"] == {}                   # 当日分は翌営業日以降
+assert track.update(trk2, {"7203": tdf}, today=date(2026, 9, 2))["checked"] == 2   # 確定済みは再計算しない
+config.TRACK_MAX_FETCH, keep = 1, config.TRACK_MAX_FETCH
+fetched.clear()
+track.update({"k": {"d": "2026-08-03", "c": "1", "r": {}}, "k2": {"d": "2026-08-03", "c": "2", "r": {}}},
+             {}, fetch=fake_fetch, today=date(2026, 9, 1))
+assert fetched == ["1"]                                           # 個別取得は上限まで
+config.TRACK_MAX_FETCH = keep
+assert len(track.prune(trk2, date(2027, 2, 1))) == 1 and len(track.prune(trk2, date(2026, 9, 2))) == 4   # 180日で落ちる
+
+# summarize(): 勝率・中央値・目安到達率
+summ = track.summarize(trk2)
+assert summ["strict"]["n"] == 1 and summ["strict"]["done"] == 1
+assert summ["strict"]["h"][20] == {"n": 1, "win": 100.0, "med": (3090 / 2850 - 1) * 100,
+                                   "worst": (3090 / 2850 - 1) * 100, "best": (3090 / 2850 - 1) * 100}
+assert summ["strict"]["target"] == 100.0 and summ["strict"]["stop"] == 0.0      # 高値3121>3080・安値2871>2720
+assert summ["all"]["n"] == 4 and summ["all"]["done"] == 2 and summ["dip"]["h"] == {}
+assert summ["dip"]["target"] is None                                             # まだ日足が無い枠は到達率を出さない
+assert "chart" in summ and summ["chart"]["h"] == {}
+
+# ページ URL と日次サマリの1行
+config.TRACK_PAGE_URL = ""
+os.environ["GITHUB_REPOSITORY"] = "CwPanda001/kabu-up"
+assert track.page_url() == "https://cwpanda001.github.io/kabu-up/"
+assert track.summary_line(trk2).startswith("成績ページ https://cwpanda001.github.io/kabu-up/\n 20日後 勝率 100%・中央値 +8.4%（確定 2件）")
+assert track.summary_line({}) == "成績ページ https://cwpanda001.github.io/kabu-up/（追跡中の銘柄なし）"
+del os.environ["GITHUB_REPOSITORY"]
+assert track.page_url() == "" and track.summary_line({}) == ""
+assert track.summary_line(trk2).startswith("成績 20日後 勝率 100%")
+config.TRACK_PAGE_URL = "https://example.invalid/p/"
+assert track.page_url() == "https://example.invalid/p/"
+config.TRACK_PAGE_URL = ""
+
+# render(): 1枚の HTML。社名はエスケープし、到達の印が付く
+trk2["2026-08-03:strict:7203"]["n"] = "<b>A&Co"
+page = track.render(trk2, tnow)
+assert page.startswith("<!doctype html>") and "tdnet-watch 通知銘柄のその後" in page
+assert "&lt;b&gt;A&amp;Co" in page and "<b>A&Co" not in page
+assert page.count('<tr data-lane="') == 4 and 'data-lane="dip"' in page
+assert "3,120.9 ✓" in page and 'class="neg hit"' not in page   # 利確目安に届いた・損切りには届いていない
+assert "20日後に上がっていた割合" in page and ">100%</b>" in page
+assert "まだ通知がありません" in track.render({}, tnow)
+tmpdir = tempfile.mkdtemp()
+track.write_page(trk2, tnow, os.path.join(tmpdir, "index.html"))
+assert os.path.exists(os.path.join(tmpdir, "index.html")) and os.path.exists(os.path.join(tmpdir, ".nojekyll"))
+track.save(trk2, os.path.join(tmpdir, "t.json"))
+assert track.load(os.path.join(tmpdir, "t.json")) == trk2 and track.load("/nonexistent.json") == {}
+
+# 日次サマリに成績ページの行が1行だけ入る（渡さなければ出ない）
+summ_txt = main_module.fmt_summary(after, {}, {"targets": 0, "hits": 0, "mkt": ("", "")}, None, trk=trk2)
+assert "成績 20日後 勝率 100%" in summ_txt
+assert "成績" not in main_module.fmt_summary(after, {}, {"targets": 0, "hits": 0, "mkt": ("", "")}, None)
 
 # --- 通知先（Slack Webhook の複数指定） ---
 # Secret 名は人名などでもよく、workflow 側で SLACK_WEBHOOK_URL_* という env 名に
