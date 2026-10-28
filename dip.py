@@ -30,6 +30,7 @@ from datetime import date, datetime
 import config
 from chart_context import (analyze, context_lines, earnings_note, market_condition,
                            trading_days_ago, yen)
+from metrics import decision_lines
 from nikkei225 import load_universe
 from notify import send
 from screener import (bounce_pct, evaluate, fetch_history, fetch_history_batch, fetch_market,
@@ -146,8 +147,12 @@ def _disc_lines(items: list, today_iso: str, limit: int = 3) -> list[str]:
 
 
 def fmt_dip(code4: str, name: str, d: Dip, ctx, earn: str, items: list,
-            kind: str, labels: list[str], today_iso: str) -> str:
-    """急落1銘柄分の本文。kind は classify_disclosures の種別（transient / none）。"""
+            kind: str, labels: list[str], today_iso: str,
+            extra: list[str] | None = None) -> str:
+    """急落1銘柄分の本文。kind は classify_disclosures の種別（transient / none）。
+
+    extra は判断数値の行（metrics.decision_lines。損切り＝当日安値・目標＝前日終値で計算）。
+    """
     lines = [f"■ {code4} {name}".rstrip()]
     lines += _disc_lines(items, today_iso)
     if kind == "transient":
@@ -183,6 +188,7 @@ def fmt_dip(code4: str, name: str, d: Dip, ctx, earn: str, items: list,
         lines.append(f" 損切り目安 {yen(d.low)}円（当日安値割れ・−{risk_pct:.1f}%）／ {up} ／ リスクリワード {rr:.1f}")
     elif d.low:
         lines.append(f" 損切り目安 {yen(d.low)}円（当日安値割れ）／ {up} ／ 反発未確認のためリスクリワード算出不可")
+    lines += extra or []
     if kind == "transient":
         lines += [f" {it.url}" for it in items if it.url]
     return "\n".join(l for l in lines if l)
@@ -272,7 +278,9 @@ def dip_scan(now: datetime, items: list, state: dict, dry_run: bool, frames: dic
         bounce = "－" if d.bounce is None else f"{d.bounce:.0f}%"
         print(f"[DIP]  {code4}: {d.gap_pct:+.1f}%（指数差{d.diff_pt:+.1f}pt）"
               f"安値{d.low_pct:+.1f}% 戻り{bounce} {kind}")
-        block = fmt_dip(code4, fetch_name(code4), d, ctx, earn, mine, kind, labels, today_iso)
+        extra = decision_lines(code4, df, d.price, d.low or None, d.prev_close,
+                               "戻り目標", idx_df=mkt_df)
+        block = fmt_dip(code4, fetch_name(code4), d, ctx, earn, mine, kind, labels, today_iso, extra)
         groups[kind].append((d, block))
         state[f"dip:{code4}"] = {"d": today_iso, "s": "dip"}
 

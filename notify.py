@@ -16,6 +16,10 @@ import re
 
 import requests
 
+# この実行で送った通知の本文（dry-run も含む）。main.py が実行の最後に、
+# ここに出てきた用語を用語解説（glossary.py）用に state へ記録する
+SENT: list[str] = []
+
 
 def _chunks(text: str, n: int):
     while text:
@@ -45,6 +49,7 @@ def slack_webhooks(env=None) -> list[tuple[str, str]]:
 
 
 def send(text: str, dry_run: bool = False) -> None:
+    SENT.append(text)
     if dry_run:
         print(text)
         return

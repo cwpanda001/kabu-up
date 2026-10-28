@@ -15,6 +15,7 @@ import names
 from chart_context import (analyze, context_lines, earnings_note, market_condition,
                            room_line, stance, yen)
 from judge import keyword_judge
+from metrics import decision_lines
 from screener import JST, bounce_pct, evaluate, fetch_history, fetch_market, next_earnings_date
 from tdnet import fetch_day
 
@@ -82,8 +83,12 @@ def _day_range_line(s) -> str:
 
 def fmt_stock(code4: str, name: str, s, data_date: date | None = None,
               today: date | None = None, disc_lines: list[str] | None = None,
-              ctx=None, earn: str = "", mkt_label: str = "") -> str:
-    """1銘柄分のレポート。s は screener.Screen（None = 株価データ無し）。"""
+              ctx=None, earn: str = "", mkt_label: str = "",
+              extra: list[str] | None = None) -> str:
+    """1銘柄分のレポート。s は screener.Screen（None = 株価データ無し）。
+
+    extra は判断数値の行（metrics.decision_lines）。
+    """
     lines = [f"■ {code4} {name}".rstrip()]
     lines += disc_lines or []
     if s is None:
@@ -106,6 +111,7 @@ def fmt_stock(code4: str, name: str, s, data_date: date | None = None,
     if ctx is not None:
         lines += context_lines(ctx)
         lines.append(room_line(ctx, s.price, s.stop))
+        lines += extra or []
         if earn:
             lines.append(f" {earn}")
         lines.append(f" 総合 {stance(ctx, mkt_label)}")
@@ -122,7 +128,8 @@ def stock_report(arg: str, now: datetime | None = None,
         items = [it for d in disclosure_days for it in fetch_day(d)]
         names.learn(items)      # 日経225の外の銘柄も日本語で出せるようにする
 
-    mkt = market_condition(fetch_market())
+    mkt_df = fetch_market()
+    mkt = market_condition(mkt_df)
     codes = parse_codes(arg)
     dropped = len(codes) > config.MAX_SCREEN_PER_RUN
     blocks, seen = [], set()
@@ -144,8 +151,11 @@ def stock_report(arg: str, now: datetime | None = None,
         closes = df.dropna(subset=["Close"])
         data_date = closes.index[-1].date() if len(closes) else None
         earn = earnings_note(next_earnings_date(code4), today)
-        blocks.append(fmt_stock(code4, fetch_name(code4), evaluate(df, now),
-                                data_date, today, disc, analyze(df), earn, mkt[0]))
+        s, ctx = evaluate(df, now), analyze(df)
+        extra = (decision_lines(code4, df, s.price, s.stop, ctx.resistance, idx_df=mkt_df)
+                 if s.price else [])
+        blocks.append(fmt_stock(code4, fetch_name(code4), s,
+                                data_date, today, disc, ctx, earn, mkt[0], extra))
     if not blocks:
         blocks.append("銘柄コードが指定されていない（例: --stock 7203）")
     if dropped:
