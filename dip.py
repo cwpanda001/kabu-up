@@ -31,6 +31,7 @@ import config
 from chart_context import (analyze, context_lines, earnings_note, market_condition,
                            trading_days_ago, yen)
 from metrics import decision_lines
+import track
 from nikkei225 import load_universe
 from notify import send
 from screener import (bounce_pct, evaluate, fetch_history, fetch_history_batch, fetch_market,
@@ -213,7 +214,8 @@ def _footer(kind: str) -> str:
             "　下げの理由（ニュース・SNS）は各自で確認。必ず戻る保証は無い。当日安値割れで撤退する前提で判断する")
 
 
-def dip_scan(now: datetime, items: list, state: dict, dry_run: bool, frames: dict | None = None) -> dict:
+def dip_scan(now: datetime, items: list, state: dict, dry_run: bool, frames: dict | None = None,
+             trk: dict | None = None) -> dict:
     """急落検知の本体。items は当日＋前営業日の TDnet 開示（run() と同じもの）。
 
     frames を渡すと（日次実行で教材スキャンが取った日足）それを使い回し、
@@ -283,6 +285,11 @@ def dip_scan(now: datetime, items: list, state: dict, dry_run: bool, frames: dic
         block = fmt_dip(code4, fetch_name(code4), d, ctx, earn, mine, kind, labels, today_iso, extra)
         groups[kind].append((d, block))
         state[f"dip:{code4}"] = {"d": today_iso, "s": "dip"}
+        if trk is not None:
+            # 損切り＝当日安値、目標＝前日終値（通知の損切り目安・戻り目標と同じ）
+            verdict = f"一過性悪材料（{'／'.join(labels)}）× 急落" if kind == "transient" else "悪材料なしの急落"
+            track.record(trk, "dip", code4, fetch_name(code4), now, d.price, d.low or None, d.prev_close,
+                         verdict, next((it.url for it in mine if it.url), ""))
 
     if stats["nodata"]:
         print(f"[dip] 株価データ無し {stats['nodata']} 銘柄")

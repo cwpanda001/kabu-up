@@ -35,7 +35,7 @@ on:
         type: boolean
         default: false
       daily:
-        description: "引け後の日次処理（教材条件スキャン＋日次サマリ）も実行する"
+        description: "引け後の日次処理（教材条件スキャン＋日次サマリ＋通知銘柄の追跡・成績ページ更新）も実行する"
         type: boolean
         default: false
       glossary:
@@ -114,7 +114,8 @@ jobs:
             opts="${opts} --force"
           fi
           if [ "${DAILY}" = "true" ] || [ "${SCHEDULE}" = "${DAILY_CRON}" ]; then
-            opts="${opts} --scan-market --summary"
+            # --track: 通知した銘柄の「その後」を更新し、成績ページ docs/index.html を作り直す
+            opts="${opts} --scan-market --summary --track"
           fi
           echo "python main.py${opts}"
           python main.py ${opts}
@@ -125,7 +126,8 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # names.json = TDnet から覚えた日本語の社名。初回実行までは存在しない
-          for f in state/seen.json state/names.json; do
+          # track.json / docs = 通知した銘柄の追跡と成績ページ（GitHub Pages で公開）
+          for f in state/seen.json state/names.json state/track.json docs/index.html docs/.nojekyll; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if git diff --cached --quiet; then
