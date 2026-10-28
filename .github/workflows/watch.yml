@@ -15,15 +15,17 @@ on:
     - cron: "3,33 7-14 * * 1-5"
     # UTC 7:35 = JST 16:35。1日1回の引け後実行。ここだけ教材条件スキャン
     # （--scan-market）と日次サマリ（--summary）を足す。日足が確定していないと
-    # 意味が無いので場中には回さない。DAILY_CRON と同じ文字列にしておくこと。
+    # 意味が無いので場中には回さない。
     - cron: "35 7 * * 1-5"
     # UTC 14:48 = JST 23:48。1日の最後（夜間の最終実行 23:33 の後）に1回だけ、
-    # その日の通知に出てきた用語の解説（--glossary）を送る。GLOSSARY_CRON と同じ文字列にしておくこと。
+    # その日の通知に出てきた用語の解説（--glossary）を送る。
     - cron: "48 14 * * 1-5"
     # 注意: GitHub の cron は混雑時に丸ごと落とされ、このリポジトリでは1日5回程度しか届いていない
     # （16:35 の日次は一度も届いたことが無い）。そのため下の Run watcher では cron の種類ではなく
     # 「JST の現在時刻」と「今日もう済ませたか（state/daily.txt・state/glossary.txt）」で
     # 日次処理と用語解説を決める。外部から15分おきに workflow_dispatch しても同じように動く。
+    # cron は数時間遅れて届くこともある（23:48 の用語解説 cron が翌朝 4:56 に届き、朝に
+    # 用語解説が送られたことがある）ので、cron の種類だけで実行を決めてはいけない。
   workflow_dispatch:
     inputs:
       stock_codes:
@@ -90,10 +92,9 @@ jobs:
           FORCE: ${{ inputs.force }}
           DAILY: ${{ inputs.daily }}
           GLOSSARY: ${{ inputs.glossary }}
-          SCHEDULE: ${{ github.event.schedule }}
-          DAILY_CRON: "35 7 * * 1-5"
-          GLOSSARY_CRON: "48 14 * * 1-5"
-          # JST でこの時刻（分単位）以降の最初の実行が、その日の日次処理／用語解説を担当する
+          # JST でこの時刻（分単位）以降の最初の実行が、その日の日次処理／用語解説を担当する。
+          # 用語解説は GLOSSARY_AFTER〜23:59 の夜だけ。日付をまたいだ実行（遅れて届いた cron 等）では送らない
+          # （送れなかった日の用語は未送信のまま残り、次の夜の用語解説にまとめて載る）
           DAILY_AFTER: "16:30"
           GLOSSARY_AFTER: "23:45"
         run: |
@@ -128,7 +129,7 @@ jobs:
             opts="${opts} --force"
           fi
           daily=no
-          if [ "${DAILY}" = "true" ] || [ "${SCHEDULE}" = "${DAILY_CRON}" ] || \
+          if [ "${DAILY}" = "true" ] || \
              { [ "${now}" -ge "$(after "${DAILY_AFTER}")" ] && [ "${daily_done}" != "${today}" ]; }; then
             # --track: 通知した銘柄の「その後」を更新し、成績ページ docs/index.html を作り直す
             opts="${opts} --scan-market --summary --track"
@@ -139,9 +140,8 @@ jobs:
           if [ "${daily}" = "yes" ]; then
             echo "${today}" > state/daily.txt      # 成功したときだけ記録する（失敗したら次の実行が再挑戦）
           fi
-          # 1日の最後の用語解説。cron（GLOSSARY_CRON）か、JST 23:45 以降の最初の実行が担当する
-          if [ "${SCHEDULE}" = "${GLOSSARY_CRON}" ] || \
-             { [ "${now}" -ge "$(after "${GLOSSARY_AFTER}")" ] && [ "${gloss_done}" != "${today}" ]; }; then
+          # 1日の最後の用語解説。JST 23:45 以降の最初の実行が担当する（1日1回・夜だけ）
+          if [ "${now}" -ge "$(after "${GLOSSARY_AFTER}")" ] && [ "${gloss_done}" != "${today}" ]; then
             python main.py --glossary
             echo "${today}" > state/glossary.txt
           fi
