@@ -20,6 +20,10 @@ on:
     # UTC 14:48 = JST 23:48。1日の最後（夜間の最終実行 23:33 の後）に1回だけ、
     # その日の通知に出てきた用語の解説（--glossary）を送る。GLOSSARY_CRON と同じ文字列にしておくこと。
     - cron: "48 14 * * 1-5"
+    # 注意: GitHub の cron は混雑時に丸ごと落とされ、このリポジトリでは1日5回程度しか届いていない
+    # （16:35 の日次は一度も届いたことが無い）。そのため下の Run watcher では cron の種類ではなく
+    # 「JST の現在時刻」と「今日もう済ませたか（state/daily.txt・state/glossary.txt）」で
+    # 日次処理と用語解説を決める。外部から15分おきに workflow_dispatch しても同じように動く。
   workflow_dispatch:
     inputs:
       stock_codes:
@@ -89,6 +93,9 @@ jobs:
           SCHEDULE: ${{ github.event.schedule }}
           DAILY_CRON: "35 7 * * 1-5"
           GLOSSARY_CRON: "48 14 * * 1-5"
+          # JST でこの時刻（分単位）以降の最初の実行が、その日の日次処理／用語解説を担当する
+          DAILY_AFTER: "16:30"
+          GLOSSARY_AFTER: "23:45"
         run: |
           # inputs.* は schedule 実行では空、API 経由の dispatch では "true"/"false" の
           # 文字列で届く。${{ inputs.x && 'a' || 'b' }} は空でない文字列を真と見なすので
@@ -101,11 +108,18 @@ jobs:
             python main.py --test-notify
             exit 0
           fi
-          # 1日の最後の用語解説。TDnet の監視は回さない（直前の 23:33 の実行で済んでいる）
-          if [ "${GLOSSARY}" = "true" ] || [ "${SCHEDULE}" = "${GLOSSARY_CRON}" ]; then
+          # 手動の用語解説だけ。TDnet の監視は回さない
+          if [ "${GLOSSARY}" = "true" ]; then
             python main.py --glossary
             exit 0
           fi
+          # 「今日の日次処理／用語解説はもう済んだか」は state/*.txt の日付で判断する
+          # （cron が落とされても、15分おきの実行のどれかが代わりに担当する）
+          today=$(date +%F)                     # TZ=Asia/Tokyo
+          now=$(( 10#$(date +%H) * 60 + 10#$(date +%M) ))
+          after() { echo $(( 10#${1%%:*} * 60 + 10#${1##*:} )); }
+          daily_done=$(cat state/daily.txt 2>/dev/null || true)
+          gloss_done=$(cat state/glossary.txt 2>/dev/null || true)
           # --chart-scan（材料ニュース無しのチャート条件）と --dip-scan（急落検知）は常に付ける。
           # 16:00 以降の実行では main.py 側で回さない
           # （引けの判定は日次実行が --scan-market の日足を使い回して行う）
@@ -113,12 +127,24 @@ jobs:
           if [ "${FORCE}" = "true" ]; then
             opts="${opts} --force"
           fi
-          if [ "${DAILY}" = "true" ] || [ "${SCHEDULE}" = "${DAILY_CRON}" ]; then
+          daily=no
+          if [ "${DAILY}" = "true" ] || [ "${SCHEDULE}" = "${DAILY_CRON}" ] || \
+             { [ "${now}" -ge "$(after "${DAILY_AFTER}")" ] && [ "${daily_done}" != "${today}" ]; }; then
             # --track: 通知した銘柄の「その後」を更新し、成績ページ docs/index.html を作り直す
             opts="${opts} --scan-market --summary --track"
+            daily=yes
           fi
           echo "python main.py${opts}"
           python main.py ${opts}
+          if [ "${daily}" = "yes" ]; then
+            echo "${today}" > state/daily.txt      # 成功したときだけ記録する（失敗したら次の実行が再挑戦）
+          fi
+          # 1日の最後の用語解説。cron（GLOSSARY_CRON）か、JST 23:45 以降の最初の実行が担当する
+          if [ "${SCHEDULE}" = "${GLOSSARY_CRON}" ] || \
+             { [ "${now}" -ge "$(after "${GLOSSARY_AFTER}")" ] && [ "${gloss_done}" != "${today}" ]; }; then
+            python main.py --glossary
+            echo "${today}" > state/glossary.txt
+          fi
 
       - name: Save state
         run: |
@@ -127,7 +153,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # names.json = TDnet から覚えた日本語の社名。初回実行までは存在しない
           # track.json / docs = 通知した銘柄の追跡と成績ページ（GitHub Pages で公開）
-          for f in state/seen.json state/names.json state/track.json docs/index.html docs/.nojekyll; do
+          for f in state/seen.json state/names.json state/track.json state/daily.txt state/glossary.txt \
+                   docs/index.html docs/.nojekyll; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if git diff --cached --quiet; then
