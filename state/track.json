@@ -604,5 +604,18 @@
 "v": "方向未確認",
 "url": "https://www.release.tdnet.info/inbs/140120261030560728.pdf",
 "r": {}
+},
+"2026-10-30:strict:7218": {
+"d": "2026-10-30",
+"t": "14:26",
+"lane": "strict",
+"c": "7218",
+"n": "田中精密",
+"p0": 1132.0,
+"stop": 1077.45,
+"target": 1134.0,
+"v": "増配",
+"url": "https://www.release.tdnet.info/inbs/140120261030560941.pdf",
+"r": {}
 }
 }
