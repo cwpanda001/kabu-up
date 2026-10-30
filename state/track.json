@@ -747,5 +747,18 @@
 "v": "方向未確認",
 "url": "https://www.release.tdnet.info/inbs/140120261029559216.pdf",
 "r": {}
+},
+"2026-10-30:strict:9506": {
+"d": "2026-10-30",
+"t": "15:45",
+"lane": "strict",
+"c": "9506",
+"n": "東北電力",
+"p0": 1288.5,
+"stop": 1226.37,
+"target": 1323.0,
+"v": "方向未確認",
+"url": "https://www.release.tdnet.info/inbs/140120261029559714.pdf",
+"r": {}
 }
 }
