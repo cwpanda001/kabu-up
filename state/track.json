@@ -617,5 +617,18 @@
 "v": "増配",
 "url": "https://www.release.tdnet.info/inbs/140120261030560941.pdf",
 "r": {}
+},
+"2026-10-30:strict:7947": {
+"d": "2026-10-30",
+"t": "15:15",
+"lane": "strict",
+"c": "7947",
+"n": "エフピコ",
+"p0": 2800.0,
+"stop": 2691.83,
+"target": 2829.0,
+"v": "増配",
+"url": "https://www.release.tdnet.info/inbs/140120261030560369.pdf",
+"r": {}
 }
 }
