@@ -1710,5 +1710,18 @@
 "v": "方向未確認",
 "url": "https://www.release.tdnet.info/inbs/140120261104564003.pdf",
 "r": {}
+},
+"2026-11-04:strict:4620": {
+"d": "2026-11-04",
+"t": "16:01",
+"lane": "strict",
+"c": "4620",
+"n": "藤倉化",
+"p0": 1134.0,
+"stop": 1046.12,
+"target": 1198.0,
+"v": "自己株式取得",
+"url": "https://www.release.tdnet.info/inbs/140120261102563319.pdf",
+"r": {}
 }
 }
