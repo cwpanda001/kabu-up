@@ -2946,5 +2946,18 @@
 "v": "悪材料なしの急落",
 "url": "https://www.release.tdnet.info/inbs/140120261106566677.pdf",
 "r": {}
+},
+"2026-11-06:strict:2814": {
+"d": "2026-11-06",
+"t": "16:01",
+"lane": "strict",
+"c": "2814",
+"n": "佐藤食品",
+"p0": 1820.0,
+"stop": 1728.1,
+"target": 1842.5,
+"v": "増配",
+"url": "https://www.release.tdnet.info/inbs/140120261105565622.pdf",
+"r": {}
 }
 }
