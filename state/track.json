@@ -5107,5 +5107,18 @@
 "v": "方向未確認",
 "url": "https://www.release.tdnet.info/inbs/140120261111572921.pdf",
 "r": {}
+},
+"2026-11-12:strict:4414": {
+"d": "2026-11-12",
+"t": "16:00",
+"lane": "strict",
+"c": "4414",
+"n": "Ｇ－フレクト",
+"p0": 1236.0,
+"stop": 1142.79,
+"target": 1241.0,
+"v": "受注",
+"url": "https://www.release.tdnet.info/inbs/140120261111573889.pdf",
+"r": {}
 }
 }
