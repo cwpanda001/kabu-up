@@ -6111,5 +6111,18 @@
 "v": "上方修正",
 "url": "https://www.release.tdnet.info/inbs/140120261112576726.pdf",
 "r": {}
+},
+"2026-11-16:strict:6820": {
+"d": "2026-11-16",
+"t": "15:30",
+"lane": "strict",
+"c": "6820",
+"n": "アイコム",
+"p0": 3680.0,
+"stop": 3480.95,
+"target": 3820.0,
+"v": "資本業務提携",
+"url": "https://www.release.tdnet.info/inbs/140120261116580701.pdf",
+"r": {}
 }
 }
