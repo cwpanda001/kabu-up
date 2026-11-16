@@ -6098,5 +6098,18 @@
 "v": "増配",
 "url": "https://www.release.tdnet.info/inbs/140120261113580355.pdf",
 "r": {}
+},
+"2026-11-16:strict:6863": {
+"d": "2026-11-16",
+"t": "13:00",
+"lane": "strict",
+"c": "6863",
+"n": "ニレコ",
+"p0": 1037.0,
+"stop": 940.88,
+"target": 1155.0,
+"v": "上方修正",
+"url": "https://www.release.tdnet.info/inbs/140120261112576726.pdf",
+"r": {}
 }
 }
