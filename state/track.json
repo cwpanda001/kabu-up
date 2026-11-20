@@ -7442,5 +7442,18 @@
 "v": "上方修正（本文推定）",
 "url": "https://www.release.tdnet.info/inbs/140120261119583688.pdf",
 "r": {}
+},
+"2026-11-20:strict:2612": {
+"d": "2026-11-20",
+"t": "20:30",
+"lane": "strict",
+"c": "2612",
+"n": "かどや製油",
+"p0": 3085.0,
+"stop": 2976.38,
+"target": null,
+"v": "賛同の意見",
+"url": "https://www.release.tdnet.info/inbs/140120261120584380.pdf",
+"r": {}
 }
 }
