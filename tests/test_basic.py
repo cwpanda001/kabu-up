@@ -997,6 +997,10 @@ assert "&lt;b&gt;A&amp;Co" in page and "<b>A&Co" not in page
 assert page.count('<tr data-lane="') == 4 and 'data-lane="dip"' in page
 assert "3,120.9 ✓" in page and 'class="neg hit"' not in page   # 利確目安に届いた・損切りには届いていない
 assert "20日後に上がっていた割合" in page and ">100%</b>" in page
+# 一覧は見出し固定の枠の中・銘柄コード（社名）で絞り込める・見出しで並べ替えられる
+assert '<div class="wrap tall"><table id="list"><thead>' in page and '<input id="q"' in page
+assert 'data-c="7203" data-n="&lt;b&gt;A&amp;Co"' in page and 'data-c="8035"' in page
+assert page.count("data-t=") == 12 and '<tr id="none" hidden>' in page
 assert "まだ通知がありません" in track.render({}, tnow)
 tmpdir = tempfile.mkdtemp()
 track.write_page(trk2, tnow, os.path.join(tmpdir, "index.html"))
