@@ -184,20 +184,52 @@ _CSS = """
 *{box-sizing:border-box}body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif}
 h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:28px 0 8px;border-left:4px solid var(--acc);padding-left:8px}
 .mut{color:var(--mut);font-size:12px}.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}
-th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right}th{background:var(--card);font-weight:600;position:sticky;top:0}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right}th{background:var(--card);font-weight:600;position:sticky;top:0;z-index:1}
 td:first-child,th:first-child,td.l,th.l{text-align:left}.pos{color:var(--pos)}.neg{color:var(--neg)}
+.tall{overflow:auto;max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);border:1px solid var(--line);border-radius:6px}
+.tall th{border-bottom:0;box-shadow:inset 0 -1px 0 var(--line)}
+th[data-t]{cursor:pointer;user-select:none}th[data-t]:hover{color:var(--acc)}
+th.asc::after{content:" ▲";font-size:10px}th.desc::after{content:" ▼";font-size:10px}
 .tag{display:inline-block;padding:0 6px;border-radius:4px;background:var(--card);font-size:12px}
 .hit{font-weight:600}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:8px 0}
 .card{background:var(--card);border-radius:8px;padding:10px}.card b{display:block;font-size:22px}.card span{font-size:12px;color:var(--mut)}
-.btn{display:inline-block;margin:0 6px 6px 0;padding:4px 10px;border:1px solid var(--line);border-radius:14px;cursor:pointer;font-size:13px;background:var(--bg);color:var(--fg)}
+.btn{display:inline-block;margin:0 6px 6px 0;padding:4px 10px;border:1px solid var(--line);border-radius:14px;cursor:pointer;font:inherit;font-size:13px;background:var(--bg);color:var(--fg)}
 .btn.on{background:var(--acc);color:#fff;border-color:var(--acc)}a{color:var(--acc)}
+.find{display:flex;align-items:center;gap:8px;margin:0 0 8px}
+.find input{flex:1;max-width:340px;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit;font-size:16px}
 .note{font-size:12px;color:var(--mut);margin-top:16px}.note li{margin:2px 0}
 """
 
+# 一覧の絞り込み（枠ボタン × 銘柄コード・社名の入力）と、見出しクリックでの並べ替え。
+# 入力は全角→半角（NFKC）にそろえ、空白・カンマ区切りで複数指定できる（どれかに当たれば表示）。
+# コードは前方一致（「72」で 72xx が出る）、社名は部分一致。
 _JS = """
+(()=>{
+const tb=document.querySelector('#list tbody'),rows=[...tb.querySelectorAll('tr[data-lane]')],
+ ths=[...document.querySelectorAll('#list th')],q=document.getElementById('q'),
+ cnt=document.getElementById('cnt'),none=document.getElementById('none');
+let lane='all',sk=0,sd=-1;
+const norm=s=>(s||'').normalize('NFKC').toUpperCase();
+function apply(){
+ const ts=norm(q.value).split(/[\\s,、]+/).filter(Boolean);let n=0;
+ rows.forEach(r=>{const c=norm(r.dataset.c),nm=norm(r.dataset.n);
+  const ok=(lane==='all'||r.dataset.lane===lane)&&(!ts.length||ts.some(t=>c.startsWith(t)||nm.includes(t)));
+  r.hidden=!ok;if(ok)n++;});
+ cnt.textContent=n+' / '+rows.length+'件';none.hidden=n>0||!rows.length;
+}
+function sort(){
+ const num=ths[sk].dataset.t==='n';
+ rows.sort((a,b)=>{const x=a.cells[sk].dataset.v||'',y=b.cells[sk].dataset.v||'';
+  if(!x||!y)return (!x)-(!y)||a.dataset.i-b.dataset.i;
+  return (num?x-y:x.localeCompare(y))*sd||a.dataset.i-b.dataset.i;});
+ rows.forEach(r=>tb.appendChild(r));
+ ths.forEach((t,i)=>{t.classList.toggle('asc',i===sk&&sd>0);t.classList.toggle('desc',i===sk&&sd<0);});
+}
+ths.forEach((th,i)=>{if(th.dataset.t)th.onclick=()=>{sd=(i===sk)?-sd:+(th.dataset.d||1);sk=i;sort();};});
 document.querySelectorAll('.btn').forEach(b=>b.onclick=()=>{
- document.querySelectorAll('.btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');
- const l=b.dataset.lane;document.querySelectorAll('tr[data-lane]').forEach(r=>r.style.display=(l==='all'||r.dataset.lane===l)?'':'none');});
+ document.querySelectorAll('.btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');lane=b.dataset.lane;apply();});
+q.oninput=apply;apply();
+})();
 """
 
 
@@ -208,16 +240,23 @@ def _pct(x, digits: int = 1, plus: bool = True) -> str:
     return f'<td class="{cls}">{x:+.{digits}f}%</td>' if plus else f"<td>{x:.{digits}f}%</td>"
 
 
+def _sv(x) -> str:
+    """並べ替え用の値（td の data-v）。値が無い件は空にして、並べ替えでは常に末尾へ回す。"""
+    return "" if x is None else f"{x:.4f}"
+
+
 def _cell_price(e: dict, key: str) -> str:
     p = e.get("r", {}).get(key)
     if p is None:
-        return '<td class="mut">−</td>'
+        return '<td class="mut" data-v="">−</td>'
     r = _ret(e, p)
     cls = "pos" if r > 0 else "neg" if r < 0 else ""
-    return f'<td class="{cls}">{yen(p)}<br><small>{r:+.1f}%</small></td>'
+    return f'<td class="{cls}" data-v="{_sv(r)}">{yen(p)}<br><small>{r:+.1f}%</small></td>'
 
 
-def _row(e: dict) -> str:
+def _row(e: dict, i: int = 0) -> str:
+    """一覧の1行。tr の data-c / data-n は銘柄コード・社名での絞り込み用、data-i は元の並び（新しい順）。
+    価格の列の data-v は通知時からの騰落率（銘柄ごとに株価の桁が違うので、価格そのものでは並べない）。"""
     r = e.get("r", {})
     name = html.escape(e.get("n") or "")
     v = html.escape(e.get("v") or "")
@@ -226,16 +265,24 @@ def _row(e: dict) -> str:
     stp = e.get("stop")
     hi_hit = bool(tgt and r.get("hi") is not None and r["hi"] >= tgt)
     lo_hit = bool(stp and r.get("lo") is not None and r["lo"] <= stp)
-    hi = (f'<td class="{"pos hit" if hi_hit else ""}">{yen(r["hi"])}{" ✓" if hi_hit else ""}</td>'
-          if r.get("hi") is not None else '<td class="mut">−</td>')
-    lo = (f'<td class="{"neg hit" if lo_hit else ""}">{yen(r["lo"])}{" ✗" if lo_hit else ""}</td>'
-          if r.get("lo") is not None else '<td class="mut">−</td>')
+    hi = (f'<td class="{"pos hit" if hi_hit else ""}" data-v="{_sv(_ret(e, r["hi"]))}">'
+          f'{yen(r["hi"])}{" ✓" if hi_hit else ""}</td>'
+          if r.get("hi") is not None else '<td class="mut" data-v="">−</td>')
+    lo = (f'<td class="{"neg hit" if lo_hit else ""}" data-v="{_sv(_ret(e, r["lo"]))}">'
+          f'{yen(r["lo"])}{" ✗" if lo_hit else ""}</td>'
+          if r.get("lo") is not None else '<td class="mut" data-v="">−</td>')
     status = "確定" if r.get("done") else (f'{r.get("days", 0)}日目' if r.get("days") else "待ち")
-    return (f'<tr data-lane="{e["lane"]}"><td class="l">{e["d"][5:].replace("-", "/")} {e["t"]}</td>'
-            f'<td class="l"><span class="tag">{LANES.get(e["lane"], e["lane"])}</span></td>'
-            f'<td class="l">{e["c"]} {name}<br><small class="mut">{v}</small>{link}</td>'
-            f'<td>{yen(e["p0"])}</td>{_cell_price(e, "1")}{_cell_price(e, "5")}{_cell_price(e, "20")}'
-            f'<td>{yen(tgt) if tgt else "−"}</td>{hi}<td>{yen(stp) if stp else "−"}</td>{lo}<td>{status}</td></tr>')
+    lane_no = list(LANES).index(e["lane"]) if e["lane"] in LANES else len(LANES)
+    code = html.escape(e["c"])
+    return (f'<tr data-lane="{e["lane"]}" data-c="{code}" data-n="{name}" data-i="{i}">'
+            f'<td class="l" data-v="{e["d"]} {e["t"]}">{e["d"][5:].replace("-", "/")} {e["t"]}</td>'
+            f'<td class="l" data-v="{lane_no}"><span class="tag">{LANES.get(e["lane"], e["lane"])}</span></td>'
+            f'<td class="l" data-v="{code}">{code} {name}<br><small class="mut">{v}</small>{link}</td>'
+            f'<td data-v="{_sv(e["p0"])}">{yen(e["p0"])}</td>'
+            f'{_cell_price(e, "1")}{_cell_price(e, "5")}{_cell_price(e, "20")}'
+            f'<td data-v="{_sv(_ret(e, tgt) if tgt else None)}">{yen(tgt) if tgt else "−"}</td>{hi}'
+            f'<td data-v="{_sv(_ret(e, stp) if stp else None)}">{yen(stp) if stp else "−"}</td>{lo}'
+            f'<td data-v="{r.get("days", 0)}">{status}</td></tr>')
 
 
 def _summary_table(summ: dict) -> str:
@@ -276,13 +323,19 @@ def render(track: dict, now: datetime) -> str:
          f'<div class="card"><b>{h20["med"]:+.1f}%</b><span>20日後の騰落率（中央値）</span></div>') if h20 else
         '<div class="card"><b>−</b><span>20日後の成績はまだ無し</span></div>',
     ]
-    btns = ['<span class="btn on" data-lane="all">すべて</span>'] + [
-        f'<span class="btn" data-lane="{k}">{v}</span>' for k, v in LANES.items()
+    btns = ['<button type="button" class="btn on" data-lane="all">すべて</button>'] + [
+        f'<button type="button" class="btn" data-lane="{k}">{v}</button>' for k, v in LANES.items()
         if any(e["lane"] == k for e in es)]
-    head = ("<tr><th class='l'>通知</th><th class='l'>枠</th><th class='l'>銘柄</th><th>通知時</th>"
-            "<th>1日後</th><th>5日後</th><th>20日後</th><th>利確目安</th><th>期間高値</th>"
-            "<th>損切り目安</th><th>期間安値</th><th>状態</th></tr>")
-    rows = "".join(_row(e) for e in es) or '<tr><td colspan="12" class="l mut">まだ通知がありません</td></tr>'
+    # data-t = 並べ替えの種類（s=文字 n=数値）、data-d = 最初に押したときの向き（-1 = 大きい順・新しい順）
+    head = ("<tr><th class='l desc' data-t='s' data-d='-1'>通知</th><th class='l' data-t='n'>枠</th>"
+            "<th class='l' data-t='s'>銘柄</th><th data-t='n'>通知時</th>"
+            "<th data-t='n' data-d='-1'>1日後</th><th data-t='n' data-d='-1'>5日後</th>"
+            "<th data-t='n' data-d='-1'>20日後</th><th data-t='n' data-d='-1'>利確目安</th>"
+            "<th data-t='n' data-d='-1'>期間高値</th><th data-t='n' data-d='-1'>損切り目安</th>"
+            "<th data-t='n' data-d='-1'>期間安値</th><th data-t='n' data-d='-1'>状態</th></tr>")
+    rows = ("".join(_row(e, i) for i, e in enumerate(es))
+            or '<tr><td colspan="12" class="l mut">まだ通知がありません</td></tr>')
+    rows += '<tr id="none" hidden><td colspan="12" class="l mut">該当する銘柄がありません</td></tr>'
     return f"""<!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tdnet-watch 成績</title><style>{_CSS}</style></head><body>
@@ -293,8 +346,11 @@ def render(track: dict, now: datetime) -> str:
 {_summary_table(summ)}
 <h2>通知した銘柄の一覧</h2>
 <div>{"".join(btns)}</div>
-<div class="wrap"><table>{head}{rows}</table></div>
+<div class="find"><input id="q" type="search" placeholder="銘柄コード・社名で絞り込み（例: 7203 6758）"
+ autocomplete="off" aria-label="銘柄コード・社名で絞り込み"><span id="cnt" class="mut"></span></div>
+<div class="wrap tall"><table id="list"><thead>{head}</thead><tbody>{rows}</tbody></table></div>
 <ul class="note">
+<li>一覧は<b>銘柄コードを入力すると絞り込める</b>（前方一致。空白・カンマ区切りで複数可。社名でも可）。見出しを押すと並べ替え（もう一度押すと逆順）。価格の列は通知時からの騰落率の順に並ぶ</li>
 <li>騰落率は<b>通知時の株価</b>からの変化。赤がプラス・青がマイナス（日本の株価ボードと同じ色）。「確定」は20営業日ぶんの値が揃った銘柄</li>
 <li>期間高値・安値は通知の翌日から20営業日のあいだの最高値・最安値。✓ は利確目安（上値抵抗。急落枠は前日終値）に届いた、✗ は損切り目安（急落枠は当日安値）を割ったことを示す。両方に付く日は、どちらが先かは日足では分からない</li>
 <li>勝率は「終値が通知時より高かった割合」で、損切りして逃げた場合は含めていない。<b>リスクリワード 1.0 のとき損益分岐の勝率は 50%</b>。実際の手数料・スリッページは含まない</li>
