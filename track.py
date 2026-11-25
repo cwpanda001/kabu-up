@@ -16,6 +16,12 @@
   - 市場比 = 銘柄の騰落率 − 同じ期間の市場全体（config.TRACK_BENCHMARK。既定は TOPIX 連動 ETF）の騰落率。
     「条件が効いたのか、相場全体が上がっただけか」を分けるために出す
   - 条件ごとの成績 = 材料の種類（増配・自己株式取得…）や出来高倍率で分けた成績（conditions()）
+
+記録は「1通知1行」のまま持つ（同じ銘柄が日をまたいで何度通知されても、まとめない）。通知ごとに
+株価・出来高倍率・目安が違い、「何回目の通知か」も分析の対象だから。その代わり各行に
+  - x   = 通知した瞬間の条件（conditions_at()。場中の出来高倍率や地合いの判定は、後から日足では復元できない）
+  - seq = 同じ枠・同じ銘柄の何回目の通知か（前回から TRACK_REPEAT_DAYS 日以内なら続きとして数える）
+を残し、集計の側で「初回のみ」の成績を並べて出す（同じ銘柄の重複が成績を左右していないかを見る）。
 """
 import html
 import json
@@ -53,19 +59,109 @@ def save(track: dict, path: str = TRACK_PATH) -> None:
         json.dump(track, f, ensure_ascii=False, indent=0)
 
 
+def _num(x, digits: int = 2):
+    """記録用の数値。None・NaN・数値でないものは None（＝項目ごと残さない）。"""
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return round(v, digits) if v == v and abs(v) != float("inf") else None
+
+
+def conditions_at(screen=None, ctx=None, dip=None, verdict: dict | None = None, market: str = "",
+                  earnings: date | None = None, today: date | None = None,
+                  vol_min: float | None = None) -> dict:
+    """通知した瞬間の条件を、後から集計できる項目として1つの dict にまとめる（record() の cond に渡す）。
+
+    screen = screener.Screen、ctx = chart_context.Context、dip = dip.Dip、verdict = judge の結果、
+    market = 地合いの判定（良好／悪化…）、earnings = 次回決算の予定日、vol_min = この通知に使った出来高倍率の下限。
+    値が無い項目は入れない。cfg は判定に使ったしきい値（config を変えた前後を後から区別するため）。"""
+    x: dict = {}
+
+    def put(key, value):
+        if value is not None and value != "":
+            x[key] = value
+
+    src = screen if screen is not None else dip
+    if src is not None:
+        price = getattr(src, "price", 0) or 0
+        put("vol_ratio", _num(src.vol_ratio))            # 出来高 ÷ 20日平均（場中は経過時間で按分した値）
+        put("gap_pct", _num(src.gap_pct))                # 前日終値比%
+        put("rsi", _num(src.rsi, 1))
+        if price:
+            put("ma25_pct", _num((price / src.ma25 - 1) * 100) if src.ma25 else None)   # 25日線からの乖離%
+            put("ma75_pct", _num((price / src.ma75 - 1) * 100) if src.ma75 else None)
+            put("atr_pct", _num(src.atr / price * 100) if src.atr else None)            # 1日の値幅の目安（ATR14）÷ 株価
+        put("after_close", bool(src.after_close))        # 引けの値で判定したか（False = 場中の途中経過）
+    if screen is not None:
+        put("entry", screen.entry_label)
+    if dip is not None:
+        put("low_pct", _num(dip.low_pct))                # 当日安値の前日終値比%
+        put("bounce", _num(dip.bounce, 0))               # 当日安値からの戻り率%
+        put("idx_gap", _num(dip.idx_gap))                # 日経平均の当日騰落率%
+        put("diff_pt", _num(dip.diff_pt))                # 銘柄 − 指数（pt）
+        put("atr_mult", _num(dip.atr_mult))              # 下げ幅 ÷ ATR14
+    if ctx is not None:
+        put("trend", ctx.trend)
+        put("stage", ctx.stage)
+        put("room_pct", _num(ctx.room_pct))              # 上値抵抗までの余地%
+        put("new_high", bool(ctx.new_high))
+        put("rolled", bool(ctx.rolled))
+        put("days_since_break", ctx.days_since_break)
+        put("warnings", list(ctx.warnings) or None)
+    if verdict:
+        put("score", verdict.get("score"))
+        put("ambiguous", bool(verdict.get("ambiguous")))
+        put("ai", bool(verdict.get("ai")))
+    put("market", market)
+    if earnings is not None and today is not None:
+        put("earn_days", (earnings - today).days)        # 次回決算までの暦日数
+    cfg = {"rsi_max": config.RSI_MAX, "max_gap": config.MAX_GAP_PCT, "atr_stop": config.ATR_STOP_MULT}
+    if vol_min is not None:
+        cfg["vol_min"] = vol_min
+    x["cfg"] = cfg
+    return x
+
+
+def _seq(track: dict, lane: str, code4: str, day: str) -> int:
+    """同じ枠・同じ銘柄の何回目の通知か。直前の通知が TRACK_REPEAT_DAYS 日以内なら、その続きとして数える。"""
+    prev = [e for e in track.values() if e.get("lane") == lane and e.get("c") == code4 and e.get("d", "") < day]
+    if not prev:
+        return 1
+    last = max(prev, key=lambda e: e["d"])
+    gap = (date.fromisoformat(day) - date.fromisoformat(last["d"])).days
+    return last.get("seq", 1) + 1 if gap <= config.TRACK_REPEAT_DAYS else 1
+
+
+def annotate(track: dict) -> int:
+    """seq（何回目の通知か）が無い行に付ける。この項目を足す前の記録のため。付けた件数を返す。"""
+    n = 0
+    for e in sorted(track.values(), key=lambda e: (e.get("d", ""), e.get("t", ""))):
+        if "seq" not in e and e.get("d") and e.get("lane") and e.get("c"):
+            e["seq"] = _seq(track, e["lane"], e["c"], e["d"])
+            n += 1
+    return n
+
+
 def record(track: dict, lane: str, code4: str, name: str, now: datetime, price: float,
-           stop: float | None, target: float | None, verdict: str = "", url: str = "") -> bool:
-    """通知1件を登録する。同じ日・同じ枠・同じ銘柄は1回だけ（False を返す）。"""
+           stop: float | None, target: float | None, verdict: str = "", url: str = "",
+           cond: dict | None = None) -> bool:
+    """通知1件を登録する。同じ日・同じ枠・同じ銘柄は1回だけ（False を返す）。
+    cond は通知した瞬間の条件（conditions_at()）。x として残す。"""
     key = f"{now.date().isoformat()}:{lane}:{code4}"
     if key in track or not price:
         return False
+    annotate(track)
     track[key] = {
         "d": now.date().isoformat(), "t": f"{now:%H:%M}", "lane": lane,
         "c": code4, "n": name, "p0": round(float(price), 2),
         "stop": round(float(stop), 2) if stop else None,
         "target": round(float(target), 2) if target else None,
         "v": verdict, "url": url, "r": {},
+        "seq": _seq(track, lane, code4, now.date().isoformat()),
     }
+    if cond:
+        track[key]["x"] = cond
     return True
 
 
@@ -124,6 +220,7 @@ def update(track: dict, frames=None, fetch=None, today: date | None = None,
     20営業日は確定しない古い銘柄が毎日上限を使い切り、新しい通知が永久に追跡されない。
     bench は市場全体の日足（市場比の計算用。progress() を参照）。"""
     today = today or date.today()
+    annotate(track)
     if callable(frames):
         frames = frames()
     frames = frames or {}
@@ -207,17 +304,22 @@ def _stats(es: list) -> dict:
 
 
 def summarize(track: dict) -> dict:
-    """枠ごとの成績。{lane: _stats(...)}。"all" は全体。"""
+    """枠ごとの成績。{lane: _stats(...)}。"all" は全体。
+    "<lane>:first" は、その枠で同じ銘柄の再通知（seq >= 2）を除いた成績（再通知がある枠だけ）。"""
     out: dict = {}
     for lane in list(LANES) + ["all"]:
         es = [e for e in track.values() if lane == "all" or e["lane"] == lane]
         if es:
             out[lane] = _stats(es)
+            first = [e for e in es if e.get("seq", 1) == 1]
+            if len(first) < len(es):             # 同じ銘柄の再通知がある枠だけ、初回のみの成績を並べる
+                out[f"{lane}:first"] = _stats(first)
     return out
 
 
 # 条件ごとの成績の行。材料は判定ラベル（"上方修正（本文推定）／増配" のように ／ 区切り）から取る
 _TAG_ALIASES = (("自己株式", "自己株式取得"), ("株主優待", "株主優待"), ("賛同の意見", "TOB 賛同"))
+SEQ_LABELS = ("初回の通知", "2回目以降の通知")
 VOL_BUCKETS = ((3.0, "出来高 3倍未満"), (6.0, "出来高 3〜6倍"), (float("inf"), "出来高 6倍以上"))
 
 
@@ -225,10 +327,12 @@ def tags(e: dict) -> list:
     """1件が属する条件（[(グループ, 条件名), ...]）。材料が複数ある通知は複数の条件に入る。"""
     v, lane = e.get("v") or "", e.get("lane")
     if lane == "chart":
-        m = re.search(r"出来高\s*([\d.]+)\s*倍", v)
-        if not m:
-            return []
-        x = float(m.group(1))
+        x = (e.get("x") or {}).get("vol_ratio")
+        if x is None:                            # x を残す前の記録は判定文から読む
+            m = re.search(r"出来高\s*([\d.]+)\s*倍", v)
+            if not m:
+                return []
+            x = float(m.group(1))
         return [("チャート条件", next(label for lim, label in VOL_BUCKETS if x < lim))]
     if lane == "dip":
         return [("急落", "一過性の悪材料で急落" if v.startswith("一過性悪材料") else "悪材料なしの急落")]
@@ -245,16 +349,20 @@ def tags(e: dict) -> list:
 
 def conditions(track: dict) -> list:
     """条件ごとの成績。[(グループ, 条件名, _stats(...)), ...]。
-    グループは 材料 → チャート条件 → 急落 の順、材料と急落は通知の多い順、出来高倍率は小さい順。"""
+    グループは 材料 → チャート条件 → 急落 → 通知回数 の順、材料と急落は通知の多い順、出来高倍率は小さい順。"""
     groups: dict = {}
     for e in track.values():
         for g, name in tags(e):
             groups.setdefault(g, {}).setdefault(name, []).append(e)
+        groups.setdefault("通知回数", {}).setdefault(SEQ_LABELS[e.get("seq", 1) > 1], []).append(e)
     vol_order = [label for _, label in VOL_BUCKETS]
     out = []
-    for g in ("材料", "チャート条件", "急落"):
+    if len(groups.get("通知回数", {})) < 2:       # 再通知が1件も無ければ、分ける意味が無い
+        groups.pop("通知回数", None)
+    for g in ("材料", "チャート条件", "急落", "通知回数"):
         names = groups.get(g, {})
         order = (sorted(names, key=vol_order.index) if g == "チャート条件"
+                 else sorted(names, key=SEQ_LABELS.index) if g == "通知回数"
                  else sorted(names, key=lambda k: -len(names[k])))
         out += [(g, name, _stats(names[name])) for name in order]
     return out
@@ -302,7 +410,8 @@ th.asc::after{content:" ▲";font-size:10px}th.desc::after{content:" ▼";font-s
 .card{background:var(--card);border-radius:8px;padding:10px}.card b{display:block;font-size:22px}.card span{font-size:12px;color:var(--mut)}
 .btn{display:inline-block;margin:0 6px 6px 0;padding:4px 10px;border:1px solid var(--line);border-radius:14px;cursor:pointer;font:inherit;font-size:13px;background:var(--bg);color:var(--fg)}
 .btn.on{background:var(--acc);color:#fff;border-color:var(--acc)}a{color:var(--acc)}
-.find{display:flex;align-items:center;gap:8px;margin:0 0 8px}
+.find{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 8px}
+.find label{display:inline-flex;align-items:center;gap:4px;font-size:13px;white-space:nowrap;cursor:pointer}
 .find input{flex:1;max-width:340px;min-width:0;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit;font-size:16px}
 .note{font-size:12px;color:var(--mut);margin-top:16px}.note li{margin:2px 0}
 """
@@ -315,12 +424,13 @@ _JS = """
 const tb=document.querySelector('#list tbody'),rows=[...tb.querySelectorAll('tr[data-lane]')],
  ths=[...document.querySelectorAll('#list th')],q=document.getElementById('q'),
  cnt=document.getElementById('cnt'),none=document.getElementById('none');
+const f1=document.getElementById('f1');
 let lane='all',sk=0,sd=-1;
 const norm=s=>(s||'').normalize('NFKC').toUpperCase();
 function apply(){
  const ts=norm(q.value).split(/[\\s,、]+/).filter(Boolean);let n=0;
  rows.forEach(r=>{const c=norm(r.dataset.c),nm=norm(r.dataset.n);
-  const ok=(lane==='all'||r.dataset.lane===lane)&&(!ts.length||ts.some(t=>c.startsWith(t)||nm.includes(t)));
+  const ok=(lane==='all'||r.dataset.lane===lane)&&(!f1.checked||r.dataset.seq==='1')&&(!ts.length||ts.some(t=>c.startsWith(t)||nm.includes(t)));
   r.hidden=!ok;if(ok)n++;});
  cnt.textContent=n+' / '+rows.length+'件';none.hidden=n>0||!rows.length;
 }
@@ -335,7 +445,7 @@ function sort(){
 ths.forEach((th,i)=>{if(th.dataset.t)th.onclick=()=>{sd=(i===sk)?-sd:+(th.dataset.d||1);sk=i;sort();};});
 document.querySelectorAll('.btn').forEach(b=>b.onclick=()=>{
  document.querySelectorAll('.btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');lane=b.dataset.lane;apply();});
-q.oninput=apply;apply();
+q.oninput=apply;f1.onchange=apply;apply();
 })();
 """
 
@@ -383,10 +493,12 @@ def _row(e: dict, i: int = 0) -> str:
     status = "確定" if r.get("done") else (f'{r.get("days", 0)}日目' if r.get("days") else "待ち")
     lane_no = list(LANES).index(e["lane"]) if e["lane"] in LANES else len(LANES)
     code = html.escape(e["c"])
-    return (f'<tr data-lane="{e["lane"]}" data-c="{code}" data-n="{name}" data-i="{i}">'
+    seq = e.get("seq", 1)
+    again = f' <span class="tag">{seq}回目</span>' if seq > 1 else ""
+    return (f'<tr data-lane="{e["lane"]}" data-c="{code}" data-n="{name}" data-i="{i}" data-seq="{seq}">'
             f'<td class="l" data-v="{e["d"]} {e["t"]}">{e["d"][5:].replace("-", "/")} {e["t"]}</td>'
             f'<td class="l" data-v="{lane_no}"><span class="tag">{LANES.get(e["lane"], e["lane"])}</span></td>'
-            f'<td class="l" data-v="{code}">{code} {name}<br><small class="mut">{v}</small>{link}</td>'
+            f'<td class="l" data-v="{code}">{code} {name}{again}<br><small class="mut">{v}</small>{link}</td>'
             f'<td data-v="{_sv(e["p0"])}">{yen(e["p0"])}</td>'
             f'{_cell_price(e, "1")}{_cell_price(e, "5")}{_cell_price(e, "20")}'
             f'<td data-v="{_sv(_ret(e, tgt) if tgt else None)}">{yen(tgt) if tgt else "−"}</td>{hi}'
@@ -423,8 +535,13 @@ def _stats_table(rows: list, first: str) -> str:
 
 
 def _summary_table(summ: dict) -> str:
-    return _stats_table([(f'<b>{"全体" if lane == "all" else LANES[lane]}</b>', summ[lane])
-                         for lane in list(LANES) + ["all"] if summ.get(lane)], "枠")
+    rows = []
+    for lane in list(LANES) + ["all"]:
+        if summ.get(lane):
+            rows.append((f'<b>{"全体" if lane == "all" else LANES[lane]}</b>', summ[lane]))
+        if summ.get(f"{lane}:first"):
+            rows.append(('<span class="mut">└ 初回の通知のみ</span>', summ[f"{lane}:first"]))
+    return _stats_table(rows, "枠")
 
 
 def _conditions_table(conds: list) -> str:
@@ -471,13 +588,14 @@ def render(track: dict, now: datetime) -> str:
 {cond_html}<h2>通知した銘柄の一覧</h2>
 <div>{"".join(btns)}</div>
 <div class="find"><input id="q" type="search" placeholder="銘柄コード・社名で絞り込み（例: 7203 6758）"
- autocomplete="off" aria-label="銘柄コード・社名で絞り込み"><span id="cnt" class="mut"></span></div>
+ autocomplete="off" aria-label="銘柄コード・社名で絞り込み"><label><input id="f1" type="checkbox">初回の通知だけ</label><span id="cnt" class="mut"></span></div>
 <div class="wrap tall"><table id="list"><thead>{head}</thead><tbody>{rows}</tbody></table></div>
 <ul class="note">
 <li>一覧は<b>銘柄コードを入力すると絞り込める</b>（前方一致。空白・カンマ区切りで複数可。社名でも可）。見出しを押すと並べ替え（もう一度押すと逆順）。価格の列は通知時からの騰落率の順に並ぶ</li>
 <li>騰落率は<b>通知時の株価</b>からの変化。赤がプラス・青がマイナス（日本の株価ボードと同じ色）。「確定」は20営業日ぶんの値が揃った銘柄</li>
 <li><b>市場比</b>は「銘柄の騰落率 − 同じ期間の市場全体（{bname}）の騰落率」。プラスなら相場全体より強かった。相場全体が上げた日・下げた日の影響を除いて、条件そのものが効いたかを見るための列。市場の通知時の値は、場中の通知は当日始値・引け後の通知は当日終値で代用している</li>
 <li><b>条件ごとの成績</b>は、材料の種類・出来高倍率（20日平均比）・急落の種類で分けたもの。材料が複数ある通知はそれぞれの行に数える。n（件数）が少ない行は1〜2銘柄の値動きで大きく変わるので、目安は30件から</li>
+<li>同じ銘柄が日をまたいで何度も通知されることがある（株価も条件も毎回違うので、一覧では<b>まとめずに1通知1行</b>で残す）。前回から{config.TRACK_REPEAT_DAYS}日以内の再通知には「2回目」「3回目」と付く。成績の表の<b>「初回の通知のみ」</b>は再通知を除いた数字で、同じ銘柄の重複が成績を左右していないかを見るためのもの</li>
 <li>期間高値・安値は通知の翌日から20営業日のあいだの最高値・最安値。✓ は利確目安（上値抵抗。急落枠は前日終値）に届いた、✗ は損切り目安（急落枠は当日安値）を割ったことを示す。両方に付く日は、どちらが先かは日足では分からない</li>
 <li>勝率は「終値が通知時より高かった割合」で、損切りして逃げた場合は含めていない。<b>リスクリワード 1.0 のとき損益分岐の勝率は 50%</b>。実際の手数料・スリッページは含まない</li>
 <li>通知は判断材料であり売買の推奨ではない。この表は「仕組みが本当に効いているか」を記録するためのもの</li>

@@ -83,6 +83,7 @@ TRACK_KEEP_DAYS  = 180   # 通知からこの暦日数を過ぎた記録はペ�
 TRACK_MAX_FETCH  = 300   # 日次実行で、ユニバース外の銘柄（TDnet 由来）の日足を取り直す上限（まとめ取り。超えた分は更新の古い順に翌日以降へ回る）
 TRACK_BENCHMARK  = "1306" # 市場比（銘柄の騰落率 − 市場全体の騰落率）の基準にする銘柄コード。既定は TOPIX 連動 ETF。空なら市場比を出さない
 TRACK_BENCHMARK_NAME = "TOPIX 連動 ETF 1306"   # 成績ページの注記に出す名前
+TRACK_REPEAT_DAYS = 30   # 同じ枠・同じ銘柄の前回の通知からこの暦日数以内なら「2回目・3回目…」と数える（約20営業日＝追跡期間と同じ）
 TRACK_PAGE_URL   = ""    # 成績ページの URL。空なら GitHub Pages の既定（https://<owner>.github.io/<repo>/）を使う
 
 # ---------- 用語解説（glossary.py。1日の最後に、その日の通知に出た用語を中学生向けに解説） ----------

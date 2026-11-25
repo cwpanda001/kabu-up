@@ -1023,6 +1023,63 @@ page3 = track.render(trk3, tnow)
 assert "<h2>条件ごとの成績</h2>" in page3 and '<span class="tag">材料</span> <b>増配</b>' in page3
 assert page3.count("<th>市場比<br>中央値</th>") == 6 and ("市場比+" in page3 or "市場比-" in page3)
 assert "条件ごとの成績</h2>" not in track.render({}, tnow)
+
+# 何回目の通知か（seq）: 同じ枠・同じ銘柄で、前回から TRACK_REPEAT_DAYS 日以内なら続きとして数える。
+# 記録はまとめず1通知1行のまま（株価も条件も毎回違う）。枠が違えば別に数える
+day = lambda m, d: datetime(2026, m, d, 9, 15, tzinfo=JST)
+trk4 = {}
+for dt in (day(8, 3), day(8, 7), day(8, 20)):
+    assert track.record(trk4, "chart", "7203", "A", dt, 2850.0, 2720.0, 3080.0, "チャート条件クリア（出来高 2.0倍）")
+track.record(trk4, "strict", "7203", "A", day(8, 7), 2850.0, 2720.0, 3080.0, "増配")
+track.record(trk4, "chart", "7203", "A", day(10, 1), 2850.0, 2720.0, 3080.0)      # 30日を超えて空いたら数え直す
+track.record(trk4, "chart", "6758", "B", day(8, 7), 2850.0, 2720.0, 3080.0)
+assert [trk4[k]["seq"] for k in ("2026-08-03:chart:7203", "2026-08-07:chart:7203", "2026-08-20:chart:7203",
+                                 "2026-08-07:strict:7203", "2026-10-01:chart:7203", "2026-08-07:chart:6758")] \
+    == [1, 2, 3, 1, 1, 1]
+# seq を足す前の記録にも、後から同じ数え方で付く（付いている行は触らない）
+old4 = {k: {kk: vv for kk, vv in v.items() if kk != "seq"} for k, v in trk4.items()}
+assert track.annotate(old4) == 6 and track.annotate(old4) == 0
+assert {k: v["seq"] for k, v in old4.items()} == {k: v["seq"] for k, v in trk4.items()}
+# 集計: 再通知がある枠だけ「初回の通知のみ」を並べる。条件ごとの成績にも 初回／2回目以降 が出る
+track.update(trk4, {"7203": tdf, "6758": tdf}, today=date(2026, 10, 2))
+summ4 = track.summarize(trk4)
+assert summ4["chart"]["n"] == 5 and summ4["chart:first"]["n"] == 3 and "strict:first" not in summ4
+assert summ4["all:first"]["n"] == 4
+assert [(g, n, s["n"]) for g, n, s in track.conditions(trk4) if g == "通知回数"] == \
+    [("通知回数", "初回の通知", 4), ("通知回数", "2回目以降の通知", 2)]
+assert not [c for c in track.conditions(trk3) if c[0] == "通知回数"]        # 再通知が無ければ出さない
+page4 = track.render(trk4, tnow)
+assert page4.count("└ 初回の通知のみ") == 2 and '<span class="tag">3回目</span>' in page4
+assert page4.count('data-seq="1"') == 4 and 'data-seq="2"' in page4 and '<input id="f1" type="checkbox">' in page4
+assert "└ 初回の通知のみ" not in page3 and "回目</span>" not in page3
+
+# 通知した瞬間の条件（x）: 後から日足では復元できない値を、項目として残す（文章ではなく数値）
+from chart_context import Context
+from screener import Screen
+from dip import Dip
+sc = Screen(passed=True, price=1000.0, prev_close=980.0, gap_pct=2.0408, ma25=950.0, ma75=900.0, rsi=61.26,
+            vol_ratio=7.94, atr=25.0, stop=950.0, entry_label="エントリー候補", after_close=False)
+cx = Context(trend="上昇", stage="追随期", resistance=1100.0, room_pct=10.0, new_high=False, rolled=True,
+             days_since_break=4, warnings=["決算が近い"])
+x4 = track.conditions_at(sc, cx, verdict={"labels": ["増配"], "score": 2, "ambiguous": "", "ai": None},
+                         market="良好", earnings=date(2026, 8, 13), today=date(2026, 8, 3), vol_min=1.5)
+assert x4 == {"vol_ratio": 7.94, "gap_pct": 2.04, "rsi": 61.3, "ma25_pct": 5.26, "ma75_pct": 11.11, "atr_pct": 2.5,
+              "after_close": False, "entry": "エントリー候補", "trend": "上昇", "stage": "追随期", "room_pct": 10.0,
+              "new_high": False, "rolled": True, "days_since_break": 4, "warnings": ["決算が近い"], "score": 2,
+              "ambiguous": False, "ai": False, "market": "良好", "earn_days": 10,
+              "cfg": {"rsi_max": config.RSI_MAX, "max_gap": config.MAX_GAP_PCT, "atr_stop": config.ATR_STOP_MULT,
+                      "vol_min": 1.5}}, x4
+xd = track.conditions_at(ctx=Context(), dip=Dip(ok=True, price=940.0, prev_close=1000.0, gap_pct=-6.0, low=920.0,
+                                                 low_pct=-8.0, bounce=25.0, idx_gap=0.1, diff_pt=-6.1, rsi=float("nan"),
+                                                 vol_ratio=3.2, atr=20.0, atr_mult=3.0))
+assert xd["low_pct"] == -8.0 and xd["bounce"] == 25 and xd["diff_pt"] == -6.1 and xd["atr_mult"] == 3.0
+assert "rsi" not in xd and "ma25_pct" not in xd and "market" not in xd and "earn_days" not in xd   # 値が無い項目は入れない
+assert set(track.conditions_at()) == {"cfg"}
+trk5 = {}
+track.record(trk5, "chart", "7203", "A", tnow, 1000.0, 950.0, 1100.0, "チャート条件クリア", cond=x4)
+assert trk5["2026-08-03:chart:7203"]["x"] == x4 and "x" not in trk4["2026-08-03:chart:7203"]
+assert track.tags(trk5["2026-08-03:chart:7203"]) == [("チャート条件", "出来高 6倍以上")]   # 判定文に倍率が無くても x から読む
+__import__("json").dumps(trk5, ensure_ascii=False)                                                       # そのまま保存できる
 assert len(track.prune(trk2, date(2027, 2, 1))) == 1 and len(track.prune(trk2, date(2026, 9, 2))) == 4   # 180日で落ちる
 
 # summarize(): 勝率・中央値・目安到達率
