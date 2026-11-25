@@ -10783,5 +10783,44 @@
 "vol_min": 1.5
 }
 }
+},
+"2026-11-25:strict:2612": {
+"d": "2026-11-25",
+"t": "21:15",
+"lane": "strict",
+"c": "2612",
+"n": "かどや製油",
+"p0": 3150.0,
+"stop": 3037.26,
+"target": null,
+"v": "賛同の意見",
+"url": "https://www.release.tdnet.info/inbs/140120261125586355.pdf",
+"r": {},
+"seq": 4,
+"x": {
+"vol_ratio": 2.55,
+"gap_pct": 1.94,
+"rsi": 69.3,
+"ma25_pct": 3.03,
+"ma75_pct": 22.6,
+"atr_pct": 1.79,
+"after_close": true,
+"entry": "エントリー候補",
+"trend": "上昇",
+"stage": "中立",
+"new_high": false,
+"rolled": false,
+"days_since_break": 23,
+"score": 2,
+"ambiguous": false,
+"ai": false,
+"market": "悪化",
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
 }
 }
