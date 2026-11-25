@@ -289,7 +289,8 @@ def dip_scan(now: datetime, items: list, state: dict, dry_run: bool, frames: dic
             # 損切り＝当日安値、目標＝前日終値（通知の損切り目安・戻り目標と同じ）
             verdict = f"一過性悪材料（{'／'.join(labels)}）× 急落" if kind == "transient" else "悪材料なしの急落"
             track.record(trk, "dip", code4, fetch_name(code4), now, d.price, d.low or None, d.prev_close,
-                         verdict, next((it.url for it in mine if it.url), ""))
+                         verdict, next((it.url for it in mine if it.url), ""),
+                         track.conditions_at(ctx=ctx, dip=d, market=mkt[0], earnings=edate, today=today))
 
     if stats["nodata"]:
         print(f"[dip] 株価データ無し {stats['nodata']} 銘柄")

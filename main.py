@@ -273,7 +273,8 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool,
             mark("pending", f"地合い悪化のため保留（{mkt[1]}）")
             continue
 
-        earn = earnings_note(next_earnings_date(code4), now.date())
+        edate = next_earnings_date(code4)
+        earn = earnings_note(edate, now.date())
         tag = "HIT" if not chart_note else "HIT*"
         print(f"[{tag}]  {code4} {name}: {v['labels']} 出来高{s.vol_ratio:.1f}倍 "
               f"gap{s.gap_pct:+.1f}% {ctx.stage}" + (f"（教材条件で通知: {chart_note}）" if chart_note else ""))
@@ -282,7 +283,9 @@ def run(items: list[Disclosure], now: datetime, state: dict, dry_run: bool,
         mark("notified")
         if trk is not None:
             track.record(trk, "soft" if chart_note else "strict", code4, name, now, s.price, s.stop,
-                         ctx.resistance, "／".join(v["labels"]), next((it.url for it in its if it.url), ""))
+                         ctx.resistance, "／".join(v["labels"]), next((it.url for it in its if it.url), ""),
+                         track.conditions_at(s, ctx, verdict=v, market=mkt[0], earnings=edate, today=now.date(),
+                                             vol_min=config.VOLUME_RATIO))
 
     strict = [h for h in hits if not h[5]]
     soft_hits = [h for h in hits if h[5]]
@@ -348,7 +351,8 @@ def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = N
         if prev and prev.get("d", "") > cooldown:
             print(f"[cool] {code4}: {prev['d']} に通知済みのため見送り")
             continue
-        earn = earnings_note(next_earnings_date(code4), now.date())
+        edate = next_earnings_date(code4)
+        earn = earnings_note(edate, now.date())
         room = "新高値" if ctx.new_high else (
             "余地不明" if ctx.room_pct is None else f"余地{ctx.room_pct:+.1f}%")
         print(f"[MKT]  {code4}: {ctx.stage} {room} gap{s.gap_pct:+.1f}% RSI{s.rsi:.0f}")
@@ -357,7 +361,8 @@ def scan_market(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = N
         state[f"mkt:{code4}"] = {"d": now.date().isoformat(), "s": "market"}
         if trk is not None:
             track.record(trk, "market", code4, hits[-1][1], now, s.price, s.stop, ctx.resistance,
-                         "教材条件クリア（追随期）")
+                         "教材条件クリア（追随期）",
+                         cond=track.conditions_at(s, ctx, market=mkt[0], earnings=edate, today=now.date()))
 
     if nodata:
         print(f"[scan] 株価データ無し {nodata} 銘柄（コード更新漏れの可能性）")
@@ -422,14 +427,17 @@ def chart_scan(now: datetime, state: dict, dry_run: bool, mkt: tuple | None = No
     hits = []
     for code4, df, s in cands[: config.CHART_MAX_HITS]:
         ctx = analyze(df)
-        earn = earnings_note(next_earnings_date(code4), now.date())
+        edate = next_earnings_date(code4)
+        earn = earnings_note(edate, now.date())
         print(f"[CHT]  {code4}: 出来高{s.vol_ratio:.1f}倍 gap{s.gap_pct:+.1f}% RSI{s.rsi:.0f} {ctx.stage}")
         hits.append((code4, fetch_name(code4), s, ctx, earn,
                      decision_lines(code4, df, s.price, s.stop, ctx.resistance, idx_df=fetch_market())))
         state[f"chart:{code4}"] = {"d": now.date().isoformat(), "s": "chart"}
         if trk is not None:
             track.record(trk, "chart", code4, hits[-1][1], now, s.price, s.stop, ctx.resistance,
-                         f"チャート条件クリア（出来高 {s.vol_ratio:.1f}倍）")
+                         f"チャート条件クリア（出来高 {s.vol_ratio:.1f}倍）",
+                         cond=track.conditions_at(s, ctx, market=mkt[0], earnings=edate, today=now.date(),
+                                                  vol_min=config.CHART_SCAN_VOLUME_RATIO))
     over = max(0, len(cands) - len(hits))
 
     if nodata:
@@ -602,8 +610,12 @@ def main() -> None:
             print(f"{now:%H:%M} は引け後のため急落検知はスキップ（引けの判定は日次実行で行う）")
     if args.track:
         # 通知の翌営業日以降の終値で「その後」を埋める。ユニバースの日足は各スキャンと共有し、
-        # TDnet 由来の銘柄だけ個別に取る
-        ts = track.update(trk, frames, fetch=lambda c: fetch_history(c, period="6mo"), today=today)
+        # TDnet 由来の銘柄だけ別にまとめて取る。市場比の基準（TOPIX 連動 ETF）も同じ期間で取る
+        bench = fetch_history(config.TRACK_BENCHMARK, period="6mo") if config.TRACK_BENCHMARK else None
+        if config.TRACK_BENCHMARK and bench is None:
+            print(f"[track] 市場比の基準 {config.TRACK_BENCHMARK} の日足が取れなかった（市場比は今回更新しない）")
+        ts = track.update(trk, frames, today=today, bench=bench,
+                          fetch_many=lambda cs: fetch_history_batch(cs, period="6mo"))
         print(f"追跡 更新 {ts['updated']}/{ts['checked']}件（個別取得 {ts['fetched']}・データ無し {ts['nodata']}）")
         trk = track.prune(trk, today)
         if not args.no_state:
