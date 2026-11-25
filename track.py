@@ -13,10 +13,14 @@
   - 利確目安到達 = 通知後20営業日のうちに高値が「上値抵抗（急落枠は前日終値）」に届いた
   - 損切り到達   = 同じ期間に安値が「損切り目安（急落枠は当日安値）」を割った
     両方に届いた場合は、どちらが先かは日足では分からないので両方に数える（保守的に見る）
+  - 市場比 = 銘柄の騰落率 − 同じ期間の市場全体（config.TRACK_BENCHMARK。既定は TOPIX 連動 ETF）の騰落率。
+    「条件が効いたのか、相場全体が上がっただけか」を分けるために出す
+  - 条件ごとの成績 = 材料の種類（増配・自己株式取得…）や出来高倍率で分けた成績（conditions()）
 """
 import html
 import json
 import os
+import re
 import statistics
 from datetime import date, datetime, timedelta
 
@@ -65,8 +69,24 @@ def record(track: dict, lane: str, code4: str, name: str, now: datetime, price: 
     return True
 
 
-def progress(e: dict, df) -> dict:
-    """1件の追跡結果 r を日足から計算する。日足に通知日以降の足が無ければ空。"""
+def _bench_at(bench, day: date, col: str = "Close") -> float | None:
+    """市場全体（ベンチマーク）の、day 以前で最も新しい足の値。無ければ None。"""
+    if bench is None:
+        return None
+    b = bench.dropna(subset=["Close"])
+    b = b[[ts.date() <= day for ts in b.index]]
+    if not len(b):
+        return None
+    v = float(b[col].iloc[-1])
+    return round(v, 2) if v == v and v > 0 else None
+
+
+def progress(e: dict, df, bench=None) -> dict:
+    """1件の追跡結果 r を日足から計算する。日足に通知日以降の足が無ければ空。
+
+    bench（市場全体の日足）を渡すと、同じ日付の値を b0（通知時）・b1/b5/b20・blast に残す。
+    通知時の値は日足からしか取れないので、引け後の通知（15:30 以降）は当日終値、
+    場中の通知は当日始値で代用する（場中の通知は 9 時台が大半なので始値が近い）。"""
     d = df.dropna(subset=["Close"])
     dates = [ts.date() for ts in d.index]
     d0 = date.fromisoformat(e["d"])
@@ -78,6 +98,13 @@ def progress(e: dict, df) -> dict:
     for n in HORIZONS:
         if len(after) >= n:
             r[str(n)] = round(float(after["Close"].iloc[n - 1]), 2)
+    b0 = _bench_at(bench, dates[idx], "Close" if e.get("t", "") >= "15:30" else "Open")
+    if b0 and len(after):
+        r["b0"] = b0
+        for n in HORIZONS:
+            if len(after) >= n:
+                r[f"b{n}"] = _bench_at(bench, dates[idx + n])
+        r["blast"] = _bench_at(bench, dates[idx + len(after)])
     if len(after):
         r["hi"] = round(float(after["High"].max()), 2)
         r["lo"] = round(float(after["Low"].min()), 2)
@@ -87,9 +114,15 @@ def progress(e: dict, df) -> dict:
     return r
 
 
-def update(track: dict, frames=None, fetch=None, today: date | None = None) -> dict:
-    """未確定の追跡を日足で更新する。frames は {code4: 日足}（ユニバース分）、
-    無い銘柄は fetch(code4) で取る（上限 TRACK_MAX_FETCH）。"""
+def update(track: dict, frames=None, fetch=None, today: date | None = None,
+           fetch_many=None, bench=None) -> dict:
+    """未確定の追跡を日足で更新する。frames は {code4: 日足}（ユニバース分）。
+
+    frames に無い銘柄（TDnet 由来）は fetch_many(codes) → {code4: 日足} でまとめて取る
+    （無ければ fetch(code4) で1銘柄ずつ）。1回の実行で取るのは TRACK_MAX_FETCH 銘柄までで、
+    「まだ一度も株価が入っていない銘柄 → 最後の更新が古い銘柄」の順に取る。登録順に取ると、
+    20営業日は確定しない古い銘柄が毎日上限を使い切り、新しい通知が永久に追跡されない。
+    bench は市場全体の日足（市場比の計算用。progress() を参照）。"""
     today = today or date.today()
     if callable(frames):
         frames = frames()
@@ -97,19 +130,30 @@ def update(track: dict, frames=None, fetch=None, today: date | None = None) -> d
     todo = [e for e in track.values() if not e.get("r", {}).get("done")
             and e["d"] < today.isoformat()]      # 当日分は翌営業日以降に埋まる
     stats = {"checked": len(todo), "updated": 0, "fetched": 0, "nodata": 0}
+    stale: dict = {}                             # 取りに行く銘柄 → 優先度（小さいほど先）
+    for e in todo:
+        if frames.get(e["c"]) is None:
+            pri = (bool(e.get("r")), e.get("r", {}).get("last_d", ""))
+            stale[e["c"]] = min(stale.get(e["c"], pri), pri)
+    want = sorted(stale, key=lambda c: stale[c])[:max(config.TRACK_MAX_FETCH, 0)]   # sorted は安定（同順位は登録順）
     cache: dict = {}
+    if want and fetch_many is not None:
+        cache = dict(fetch_many(want) or {})
+    elif fetch is not None:
+        cache = {c: fetch(c) for c in want}
+    if fetch_many is not None or fetch is not None:
+        stats["fetched"] = len(want)
     for e in todo:
         c = e["c"]
         df = frames.get(c)
-        if df is None and c in cache:
-            df = cache[c]
-        if df is None and fetch is not None and stats["fetched"] < config.TRACK_MAX_FETCH:
-            stats["fetched"] += 1
-            df = cache[c] = fetch(c)
+        if df is None:
+            df = cache.get(c)
         if df is None:
             stats["nodata"] += 1
             continue
-        r = progress(e, df)
+        r = progress(e, df, bench)
+        if r and bench is None:                  # 市場の日足が取れなかった回は、前回までの市場の値を消さない
+            r.update({k: v for k, v in e.get("r", {}).items() if k.startswith("b") and k not in r})
         if r:
             e["r"] = r
             stats["updated"] += 1
@@ -127,29 +171,92 @@ def _ret(e: dict, price) -> float | None:
     return (price / e["p0"] - 1) * 100
 
 
+def _xret(e: dict, key: str) -> float | None:
+    """市場比（銘柄の騰落率 − 同じ期間の市場全体の騰落率）。市場の値が無ければ None。"""
+    r = e.get("r", {})
+    b0, b1 = r.get("b0"), r.get(f"b{key}")
+    ret = _ret(e, r.get(key))
+    if ret is None or not b0 or not b1:
+        return None
+    return ret - (b1 / b0 - 1) * 100
+
+
+def _stats(es: list) -> dict:
+    """件の集まりの成績。{"n":件数, "done":確定件数, "h": {1: {...}, 5: ..., 20: ...}, "target":到達率, "stop":到達率}
+    h[n] の xmed / xwin / xn は市場比の中央値・市場に勝った割合・その件数（市場の値がある件だけ。無ければキー自体が無い）。"""
+    s: dict = {"n": len(es), "done": sum(1 for e in es if e.get("r", {}).get("done")), "h": {}}
+    for n in HORIZONS:
+        rets = [_ret(e, e["r"].get(str(n))) for e in es if e.get("r", {}).get(str(n))]
+        rets = [x for x in rets if x is not None]
+        if rets:
+            s["h"][n] = {"n": len(rets),
+                         "win": sum(1 for x in rets if x > 0) / len(rets) * 100,
+                         "med": statistics.median(rets),
+                         "worst": min(rets), "best": max(rets)}
+            xs = [x for x in (_xret(e, str(n)) for e in es) if x is not None]
+            if xs:
+                s["h"][n].update(xmed=statistics.median(xs), xn=len(xs),
+                                 xwin=sum(1 for x in xs if x > 0) / len(xs) * 100)
+    with_days = [e for e in es if e.get("r", {}).get("days")]
+    tg = [e for e in with_days if e.get("target")]
+    st = [e for e in with_days if e.get("stop")]
+    s["target"] = (sum(1 for e in tg if e["r"]["hi"] >= e["target"]) / len(tg) * 100) if tg else None
+    s["stop"] = (sum(1 for e in st if e["r"]["lo"] <= e["stop"]) / len(st) * 100) if st else None
+    s["target_n"], s["stop_n"] = len(tg), len(st)
+    return s
+
+
 def summarize(track: dict) -> dict:
-    """枠ごとの成績。{lane: {"n":件数, "done":確定件数, "h": {1: {...}, 5: ..., 20: ...}, "target":到達率, "stop":到達率}}"""
+    """枠ごとの成績。{lane: _stats(...)}。"all" は全体。"""
     out: dict = {}
     for lane in list(LANES) + ["all"]:
         es = [e for e in track.values() if lane == "all" or e["lane"] == lane]
-        if not es:
-            continue
-        s: dict = {"n": len(es), "done": sum(1 for e in es if e.get("r", {}).get("done")), "h": {}}
-        for n in HORIZONS:
-            rets = [_ret(e, e["r"].get(str(n))) for e in es if e.get("r", {}).get(str(n))]
-            rets = [x for x in rets if x is not None]
-            if rets:
-                s["h"][n] = {"n": len(rets),
-                             "win": sum(1 for x in rets if x > 0) / len(rets) * 100,
-                             "med": statistics.median(rets),
-                             "worst": min(rets), "best": max(rets)}
-        with_days = [e for e in es if e.get("r", {}).get("days")]
-        tg = [e for e in with_days if e.get("target")]
-        st = [e for e in with_days if e.get("stop")]
-        s["target"] = (sum(1 for e in tg if e["r"]["hi"] >= e["target"]) / len(tg) * 100) if tg else None
-        s["stop"] = (sum(1 for e in st if e["r"]["lo"] <= e["stop"]) / len(st) * 100) if st else None
-        s["target_n"], s["stop_n"] = len(tg), len(st)
-        out[lane] = s
+        if es:
+            out[lane] = _stats(es)
+    return out
+
+
+# 条件ごとの成績の行。材料は判定ラベル（"上方修正（本文推定）／増配" のように ／ 区切り）から取る
+_TAG_ALIASES = (("自己株式", "自己株式取得"), ("株主優待", "株主優待"), ("賛同の意見", "TOB 賛同"))
+VOL_BUCKETS = ((3.0, "出来高 3倍未満"), (6.0, "出来高 3〜6倍"), (float("inf"), "出来高 6倍以上"))
+
+
+def tags(e: dict) -> list:
+    """1件が属する条件（[(グループ, 条件名), ...]）。材料が複数ある通知は複数の条件に入る。"""
+    v, lane = e.get("v") or "", e.get("lane")
+    if lane == "chart":
+        m = re.search(r"出来高\s*([\d.]+)\s*倍", v)
+        if not m:
+            return []
+        x = float(m.group(1))
+        return [("チャート条件", next(label for lim, label in VOL_BUCKETS if x < lim))]
+    if lane == "dip":
+        return [("急落", "一過性の悪材料で急落" if v.startswith("一過性悪材料") else "悪材料なしの急落")]
+    if lane not in ("strict", "soft"):
+        return []
+    out = []
+    for part in v.split("／"):
+        name = re.sub(r"（.*?）", "", part).strip()
+        name = next((alias for key, alias in _TAG_ALIASES if key in name), name)
+        if name and ("材料", name) not in out:
+            out.append(("材料", name))
+    return out
+
+
+def conditions(track: dict) -> list:
+    """条件ごとの成績。[(グループ, 条件名, _stats(...)), ...]。
+    グループは 材料 → チャート条件 → 急落 の順、材料と急落は通知の多い順、出来高倍率は小さい順。"""
+    groups: dict = {}
+    for e in track.values():
+        for g, name in tags(e):
+            groups.setdefault(g, {}).setdefault(name, []).append(e)
+    vol_order = [label for _, label in VOL_BUCKETS]
+    out = []
+    for g in ("材料", "チャート条件", "急落"):
+        names = groups.get(g, {})
+        order = (sorted(names, key=vol_order.index) if g == "チャート条件"
+                 else sorted(names, key=lambda k: -len(names[k])))
+        out += [(g, name, _stats(names[name])) for name in order]
     return out
 
 
@@ -251,7 +358,9 @@ def _cell_price(e: dict, key: str) -> str:
         return '<td class="mut" data-v="">−</td>'
     r = _ret(e, p)
     cls = "pos" if r > 0 else "neg" if r < 0 else ""
-    return f'<td class="{cls}" data-v="{_sv(r)}">{yen(p)}<br><small>{r:+.1f}%</small></td>'
+    x = _xret(e, key)
+    xs = f' <small class="mut">市場比{x:+.1f}</small>' if x is not None else ""
+    return f'<td class="{cls}" data-v="{_sv(r)}">{yen(p)}<br><small>{r:+.1f}%</small>{xs}</td>'
 
 
 def _row(e: dict, i: int = 0) -> str:
@@ -285,14 +394,13 @@ def _row(e: dict, i: int = 0) -> str:
             f'<td data-v="{r.get("days", 0)}">{status}</td></tr>')
 
 
-def _summary_table(summ: dict) -> str:
-    rows = []
-    for lane in list(LANES) + ["all"]:
-        s = summ.get(lane)
-        if not s:
-            continue
-        label = "全体" if lane == "all" else LANES[lane]
-        cells = [f'<td class="l"><b>{label}</b></td><td>{s["n"]}</td><td>{s["done"]}</td>']
+def _stats_table(rows: list, first: str) -> str:
+    """成績の表。rows は [(見出しセルの中身, _stats(...)), ...]、first は左端の列名。
+    市場比の列は、市場の値が1件でも入っていれば出す。"""
+    bench = any("xmed" in h for _, s in rows for h in s["h"].values())
+    body = []
+    for label, s in rows:
+        cells = [f'<td class="l">{label}</td><td>{s["n"]}</td><td>{s["done"]}</td>']
         for n in HORIZONS:
             h = s["h"].get(n)
             if h:
@@ -300,20 +408,36 @@ def _summary_table(summ: dict) -> str:
                 cells.append(_pct(h["med"]))
             else:
                 cells += ['<td class="mut">−</td>', '<td class="mut">−</td>']
+            if bench:
+                cells.append(_pct(h.get("xmed")) if h else '<td class="mut">−</td>')
         h20 = s["h"].get(20)
         cells.append(_pct(h20["worst"]) if h20 else '<td class="mut">−</td>')
         cells.append(f'<td>{s["target"]:.0f}%</td>' if s["target"] is not None else '<td class="mut">−</td>')
         cells.append(f'<td>{s["stop"]:.0f}%</td>' if s["stop"] is not None else '<td class="mut">−</td>')
-        rows.append("<tr>" + "".join(cells) + "</tr>")
-    head = ("<tr><th class='l'>枠</th><th>通知</th><th>確定</th>"
-            "<th>1日後<br>勝率</th><th>中央値</th><th>5日後<br>勝率</th><th>中央値</th>"
-            "<th>20日後<br>勝率</th><th>中央値</th><th>20日後<br>最悪</th><th>利確目安<br>到達</th><th>損切り<br>到達</th></tr>")
-    return f'<div class="wrap"><table>{head}{"".join(rows)}</table></div>'
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    xh = "<th>市場比<br>中央値</th>" if bench else ""
+    head = (f"<tr><th class='l'>{first}</th><th>通知</th><th>確定</th>"
+            + "".join(f"<th>{n}日後<br>勝率</th><th>中央値</th>{xh}" for n in HORIZONS)
+            + "<th>20日後<br>最悪</th><th>利確目安<br>到達</th><th>損切り<br>到達</th></tr>")
+    return f'<div class="wrap"><table>{head}{"".join(body)}</table></div>'
+
+
+def _summary_table(summ: dict) -> str:
+    return _stats_table([(f'<b>{"全体" if lane == "all" else LANES[lane]}</b>', summ[lane])
+                         for lane in list(LANES) + ["all"] if summ.get(lane)], "枠")
+
+
+def _conditions_table(conds: list) -> str:
+    return _stats_table([(f'<span class="tag">{html.escape(g)}</span> <b>{html.escape(name)}</b>', s)
+                         for g, name, s in conds], "条件")
 
 
 def render(track: dict, now: datetime) -> str:
     es = sorted(track.values(), key=lambda e: (e["d"], e["t"]), reverse=True)
     summ = summarize(track)
+    conds = conditions(track)
+    cond_html = (f"<h2>条件ごとの成績</h2>\n{_conditions_table(conds)}\n" if conds else "")
+    bname = html.escape(config.TRACK_BENCHMARK_NAME)
     all_ = summ.get("all") or {"n": 0, "done": 0, "h": {}}
     h20 = all_["h"].get(20)
     cards = [
@@ -344,7 +468,7 @@ def render(track: dict, now: datetime) -> str:
 <div class="cards">{"".join(cards)}</div>
 <h2>枠ごとの成績</h2>
 {_summary_table(summ)}
-<h2>通知した銘柄の一覧</h2>
+{cond_html}<h2>通知した銘柄の一覧</h2>
 <div>{"".join(btns)}</div>
 <div class="find"><input id="q" type="search" placeholder="銘柄コード・社名で絞り込み（例: 7203 6758）"
  autocomplete="off" aria-label="銘柄コード・社名で絞り込み"><span id="cnt" class="mut"></span></div>
@@ -352,6 +476,8 @@ def render(track: dict, now: datetime) -> str:
 <ul class="note">
 <li>一覧は<b>銘柄コードを入力すると絞り込める</b>（前方一致。空白・カンマ区切りで複数可。社名でも可）。見出しを押すと並べ替え（もう一度押すと逆順）。価格の列は通知時からの騰落率の順に並ぶ</li>
 <li>騰落率は<b>通知時の株価</b>からの変化。赤がプラス・青がマイナス（日本の株価ボードと同じ色）。「確定」は20営業日ぶんの値が揃った銘柄</li>
+<li><b>市場比</b>は「銘柄の騰落率 − 同じ期間の市場全体（{bname}）の騰落率」。プラスなら相場全体より強かった。相場全体が上げた日・下げた日の影響を除いて、条件そのものが効いたかを見るための列。市場の通知時の値は、場中の通知は当日始値・引け後の通知は当日終値で代用している</li>
+<li><b>条件ごとの成績</b>は、材料の種類・出来高倍率（20日平均比）・急落の種類で分けたもの。材料が複数ある通知はそれぞれの行に数える。n（件数）が少ない行は1〜2銘柄の値動きで大きく変わるので、目安は30件から</li>
 <li>期間高値・安値は通知の翌日から20営業日のあいだの最高値・最安値。✓ は利確目安（上値抵抗。急落枠は前日終値）に届いた、✗ は損切り目安（急落枠は当日安値）を割ったことを示す。両方に付く日は、どちらが先かは日足では分からない</li>
 <li>勝率は「終値が通知時より高かった割合」で、損切りして逃げた場合は含めていない。<b>リスクリワード 1.0 のとき損益分岐の勝率は 50%</b>。実際の手数料・スリッページは含まない</li>
 <li>通知は判断材料であり売買の推奨ではない。この表は「仕組みが本当に効いているか」を記録するためのもの</li>

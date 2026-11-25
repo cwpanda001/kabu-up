@@ -602,8 +602,12 @@ def main() -> None:
             print(f"{now:%H:%M} は引け後のため急落検知はスキップ（引けの判定は日次実行で行う）")
     if args.track:
         # 通知の翌営業日以降の終値で「その後」を埋める。ユニバースの日足は各スキャンと共有し、
-        # TDnet 由来の銘柄だけ個別に取る
-        ts = track.update(trk, frames, fetch=lambda c: fetch_history(c, period="6mo"), today=today)
+        # TDnet 由来の銘柄だけ別にまとめて取る。市場比の基準（TOPIX 連動 ETF）も同じ期間で取る
+        bench = fetch_history(config.TRACK_BENCHMARK, period="6mo") if config.TRACK_BENCHMARK else None
+        if config.TRACK_BENCHMARK and bench is None:
+            print(f"[track] 市場比の基準 {config.TRACK_BENCHMARK} の日足が取れなかった（市場比は今回更新しない）")
+        ts = track.update(trk, frames, today=today, bench=bench,
+                          fetch_many=lambda cs: fetch_history_batch(cs, period="6mo"))
         print(f"追跡 更新 {ts['updated']}/{ts['checked']}件（個別取得 {ts['fetched']}・データ無し {ts['nodata']}）")
         trk = track.prune(trk, today)
         if not args.no_state:

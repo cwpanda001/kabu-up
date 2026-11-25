@@ -964,6 +964,65 @@ track.update({"k": {"d": "2026-08-03", "c": "1", "r": {}}, "k2": {"d": "2026-08-
              {}, fetch=fake_fetch, today=date(2026, 9, 1))
 assert fetched == ["1"]                                           # 個別取得は上限まで
 config.TRACK_MAX_FETCH = keep
+# 個別取得の順番: まだ株価が入っていない銘柄 → 最後の更新が古い銘柄。登録順だと、確定しない古い銘柄が
+# 毎日上限を使い切り、新しい通知が永久に追跡されない（実際に材料枠の 6 割が未追跡になった）
+starve = {"a": {"d": "2026-08-03", "c": "1", "r": {"days": 3, "last_d": "2026-08-06"}},
+          "b": {"d": "2026-08-03", "c": "2", "r": {"days": 2, "last_d": "2026-08-05"}},
+          "c": {"d": "2026-08-04", "c": "3", "r": {}},
+          "c2": {"d": "2026-08-05", "c": "3", "r": {"days": 1, "last_d": "2026-08-06"}}}
+config.TRACK_MAX_FETCH, keep = 2, config.TRACK_MAX_FETCH
+fetched.clear()
+assert track.update(starve, {}, fetch=fake_fetch, today=date(2026, 9, 1))["fetched"] == 2
+assert fetched == ["3", "2"], fetched                             # 未取得の 3 が先頭、次に更新の古い 2
+config.TRACK_MAX_FETCH = keep
+# fetch_many があれば、足りない銘柄を1回でまとめて取る
+many_calls = []
+def fake_many(cs):
+    many_calls.append(list(cs))
+    return {c: tdf for c in cs if c != "9999"}
+trk3 = {}
+track.record(trk3, "strict", "6758", "B", tnow, 2850.0, 2720.0, 3080.0, "上方修正（本文推定）／増配")
+track.record(trk3, "strict", "9999", "C", tnow, 2850.0, 2720.0, 3080.0, "自己株式の取得")
+track.record(trk3, "chart", "7203", "A", tnow, 2850.0, 2720.0, 3080.0, "チャート条件クリア（出来高 7.9倍）")
+st3 = track.update(trk3, {"7203": tdf}, fetch_many=fake_many, today=date(2026, 9, 1), bench=tdf)
+assert many_calls == [["6758", "9999"]] and st3 == {"checked": 3, "updated": 2, "fetched": 2, "nodata": 1}, st3
+
+# 市場比: 銘柄と同じ日足を市場として渡す。場中（10:00）の通知は当日始値が基準、同じ値動きなので
+# 「銘柄の騰落率 − 市場の騰落率」は p0 と当日始値のずれだけになる
+r3 = trk3["2026-08-03:chart:7203"]["r"]
+b_day = tdf.iloc[after_pos - 1]
+assert r3["b0"] == round(float(b_day["Open"]), 2) and r3["b20"] == r3["20"] and r3["blast"] == r3["last"]
+x20 = track._xret(trk3["2026-08-03:chart:7203"], "20")
+assert abs(x20 - ((r3["20"] / 2850 - 1) - (r3["20"] / r3["b0"] - 1)) * 100) < 1e-9
+late = dict(trk3["2026-08-03:chart:7203"], t="15:30")           # 引け後の通知は当日終値が基準
+assert track.progress(late, tdf, tdf)["b0"] == round(float(b_day["Close"]), 2)
+assert "b0" not in track.progress(late, tdf)                    # 市場の日足を渡さなければ何も足さない
+s3 = track.summarize(trk3)["chart"]["h"][20]
+assert s3["xn"] == 1 and abs(s3["xmed"] - x20) < 1e-9 and s3["xwin"] in (0.0, 100.0)
+# 市場の日足が取れなかった回（bench=None）でも、前回までの市場の値は消さない
+trk3["2026-08-03:chart:7203"]["r"]["done"] = False
+track.update(trk3, {"7203": tdf}, today=date(2026, 9, 1))
+assert trk3["2026-08-03:chart:7203"]["r"]["b0"] == r3["b0"] and trk3["2026-08-03:chart:7203"]["r"]["done"]
+
+# 条件ごとの成績: 材料は ／ で分けて（）を外し、表記ゆれをまとめる。複数材料は両方の行に数える
+tg = lambda lane, v: track.tags({"lane": lane, "v": v})
+assert tg("strict", "上方修正（本文推定）／増配") == [("材料", "上方修正"), ("材料", "増配")]
+assert tg("strict", "自己株式の取得") == tg("soft", "自己株式取得") == [("材料", "自己株式取得")]
+assert tg("strict", "株主優待制度の新設") == [("材料", "株主優待")] and tg("strict", "") == []
+assert tg("chart", "チャート条件クリア（出来高 1.6倍）") == [("チャート条件", "出来高 3倍未満")]
+assert tg("chart", "チャート条件クリア（出来高 3.0倍）") == [("チャート条件", "出来高 3〜6倍")]
+assert tg("chart", "チャート条件クリア（出来高 12.4倍）") == [("チャート条件", "出来高 6倍以上")]
+assert tg("dip", "悪材料なしの急落") == [("急落", "悪材料なしの急落")]
+assert tg("dip", "一過性悪材料（不正アクセス）× 急落") == [("急落", "一過性の悪材料で急落")]
+assert tg("market", "教材条件クリア") == [] and tg("chart", "") == []
+conds = track.conditions(trk3)
+assert [(g, n, s["n"]) for g, n, s in conds] == [("材料", "上方修正", 1), ("材料", "増配", 1), ("材料", "自己株式取得", 1),
+                                                 ("チャート条件", "出来高 6倍以上", 1)]
+assert conds[0][2]["h"][20]["n"] == 1 and conds[2][2]["h"] == {}     # 9999 は日足が取れていない
+page3 = track.render(trk3, tnow)
+assert "<h2>条件ごとの成績</h2>" in page3 and '<span class="tag">材料</span> <b>増配</b>' in page3
+assert page3.count("<th>市場比<br>中央値</th>") == 6 and ("市場比+" in page3 or "市場比-" in page3)
+assert "条件ごとの成績</h2>" not in track.render({}, tnow)
 assert len(track.prune(trk2, date(2027, 2, 1))) == 1 and len(track.prune(trk2, date(2026, 9, 2))) == 4   # 180日で落ちる
 
 # summarize(): 勝率・中央値・目安到達率
@@ -1000,7 +1059,7 @@ assert "20日後に上がっていた割合" in page and ">100%</b>" in page
 # 一覧は見出し固定の枠の中・銘柄コード（社名）で絞り込める・見出しで並べ替えられる
 assert '<div class="wrap tall"><table id="list"><thead>' in page and '<input id="q"' in page
 assert 'data-c="7203" data-n="&lt;b&gt;A&amp;Co"' in page and 'data-c="8035"' in page
-assert page.count("data-t=") == 12 and '<tr id="none" hidden>' in page
+assert "<th>市場比" not in page and page.count("data-t=") == 12 and '<tr id="none" hidden>' in page
 assert "まだ通知がありません" in track.render({}, tnow)
 tmpdir = tempfile.mkdtemp()
 track.write_page(trk2, tnow, os.path.join(tmpdir, "index.html"))
