@@ -403,9 +403,11 @@ th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right}th{ba
 td:first-child,th:first-child,td.l,th.l{text-align:left}.pos{color:var(--pos)}.neg{color:var(--neg)}
 .tall{overflow:auto;max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);border:1px solid var(--line);border-radius:6px}
 .tall th{border-bottom:0;box-shadow:inset 0 -1px 0 var(--line)}
+.stat{border:1px solid var(--line);border-radius:6px}.stat th{border-bottom:0;box-shadow:inset 0 -1px 0 var(--line)}
 .stat table{border-collapse:separate;border-spacing:0}.stat tr:last-child td{border-bottom:0}
 .stat td:first-child,.stat th:first-child{position:sticky;left:0;background:var(--bg);box-shadow:inset -1px 0 0 var(--line)}
 .stat th:first-child{background:var(--card);z-index:2;box-shadow:inset -1px -1px 0 var(--line)}
+.stat.stuck th{box-shadow:inset 0 -1px 0 var(--line),0 2px 4px rgba(0,0,0,.12)}.stat.stuck th:first-child{box-shadow:inset -1px -1px 0 var(--line),0 2px 4px rgba(0,0,0,.12)}
 th[data-t]{cursor:pointer;user-select:none}th[data-t]:hover{color:var(--acc)}
 th.asc::after{content:" ▲";font-size:10px}th.desc::after{content:" ▼";font-size:10px}
 .tag{display:inline-block;padding:0 6px;border-radius:4px;background:var(--card);font-size:12px}
@@ -449,6 +451,15 @@ ths.forEach((th,i)=>{if(th.dataset.t)th.onclick=()=>{sd=(i===sk)?-sd:+(th.datase
 document.querySelectorAll('.btn').forEach(b=>b.onclick=()=>{
  document.querySelectorAll('.btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');lane=b.dataset.lane;apply();});
 q.oninput=apply;f1.onchange=apply;apply();
+})();
+// 成績の表（.stat）の見出し行を、ページを下へスクロールしても画面の上端に残す（表の下端まで）
+(()=>{
+const ws=[...document.querySelectorAll('.stat')];let busy=false;
+function fix(){busy=false;ws.forEach(w=>{const t=w.querySelector('table'),h=t.tHead,r=t.getBoundingClientRect();
+ const y=Math.max(0,Math.min(-r.top,r.height-h.offsetHeight-(t.tBodies[0].rows[0]||{offsetHeight:0}).offsetHeight));
+ const v=y?'translateY('+y+'px)':'';[...h.rows[0].cells].forEach(c=>c.style.transform=v);w.classList.toggle('stuck',y>0);});}
+const go=()=>{if(!busy){busy=true;requestAnimationFrame(fix);}};
+addEventListener('scroll',go,{passive:true});addEventListener('resize',go);fix();
 })();
 """
 
@@ -534,9 +545,10 @@ def _stats_table(rows: list, first: str) -> str:
     head = (f"<tr><th class='l'>{first}</th><th>通知</th><th>確定</th>"
             + "".join(f"<th>{n}日後<br>勝率</th><th>中央値</th>{xh}" for n in HORIZONS)
             + "<th>20日後<br>最悪</th><th>利確目安<br>到達</th><th>損切り<br>到達</th></tr>")
-    # 縦にも横にもスクロールする枠に入れ、見出し行と左端の列（条件名）を固定する。
-    # 枠の外（ページ）でスクロールすると sticky が効かないので、一覧と同じ .tall にする
-    return f'<div class="wrap tall stat"><table><thead>{head}</thead><tbody>{"".join(body)}</tbody></table></div>'
+    # Excel の「先頭行・先頭列の固定」と同じ見た目にする。左端の列（条件名）は横スクロールの枠の中で
+    # sticky で固定、見出し行はページのスクロールに合わせて _JS が下へずらす（横スクロールの枠があると
+    # th の position:sticky はページのスクロールには効かないため）
+    return f'<div class="wrap stat"><table><thead>{head}</thead><tbody>{"".join(body)}</tbody></table></div>'
 
 
 def _summary_table(summ: dict) -> str:
