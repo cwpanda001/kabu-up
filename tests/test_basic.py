@@ -1115,6 +1115,8 @@ assert "3,120.9 ✓" in page and 'class="neg hit"' not in page   # 利確目安�
 assert "20日後に上がっていた割合" in page and ">100%</b>" in page
 # 一覧は見出し固定の枠の中・銘柄コード（社名）で絞り込める・見出しで並べ替えられる
 assert '<div class="wrap tall"><table id="list"><thead>' in page and '<input id="q"' in page
+# 成績の表も見出し行・左端の列を固定する枠の中（ページをスクロールしても見出しが消えない）
+assert page.count('<div class="wrap tall stat"><table><thead>') >= 1 and "position:sticky;left:0" in page
 assert 'data-c="7203" data-n="&lt;b&gt;A&amp;Co"' in page and 'data-c="8035"' in page
 assert "<th>市場比" not in page and page.count("data-t=") == 12 and '<tr id="none" hidden>' in page
 assert "まだ通知がありません" in track.render({}, tnow)

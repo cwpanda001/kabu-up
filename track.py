@@ -403,6 +403,9 @@ th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right}th{ba
 td:first-child,th:first-child,td.l,th.l{text-align:left}.pos{color:var(--pos)}.neg{color:var(--neg)}
 .tall{overflow:auto;max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);border:1px solid var(--line);border-radius:6px}
 .tall th{border-bottom:0;box-shadow:inset 0 -1px 0 var(--line)}
+.stat table{border-collapse:separate;border-spacing:0}.stat tr:last-child td{border-bottom:0}
+.stat td:first-child,.stat th:first-child{position:sticky;left:0;background:var(--bg);box-shadow:inset -1px 0 0 var(--line)}
+.stat th:first-child{background:var(--card);z-index:2;box-shadow:inset -1px -1px 0 var(--line)}
 th[data-t]{cursor:pointer;user-select:none}th[data-t]:hover{color:var(--acc)}
 th.asc::after{content:" ▲";font-size:10px}th.desc::after{content:" ▼";font-size:10px}
 .tag{display:inline-block;padding:0 6px;border-radius:4px;background:var(--card);font-size:12px}
@@ -531,7 +534,9 @@ def _stats_table(rows: list, first: str) -> str:
     head = (f"<tr><th class='l'>{first}</th><th>通知</th><th>確定</th>"
             + "".join(f"<th>{n}日後<br>勝率</th><th>中央値</th>{xh}" for n in HORIZONS)
             + "<th>20日後<br>最悪</th><th>利確目安<br>到達</th><th>損切り<br>到達</th></tr>")
-    return f'<div class="wrap"><table>{head}{"".join(body)}</table></div>'
+    # 縦にも横にもスクロールする枠に入れ、見出し行と左端の列（条件名）を固定する。
+    # 枠の外（ページ）でスクロールすると sticky が効かないので、一覧と同じ .tall にする
+    return f'<div class="wrap tall stat"><table><thead>{head}</thead><tbody>{"".join(body)}</tbody></table></div>'
 
 
 def _summary_table(summ: dict) -> str:
