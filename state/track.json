@@ -11236,5 +11236,47 @@
 "vol_min": 1.5
 }
 }
+},
+"2026-11-26:chart:9202": {
+"d": "2026-11-26",
+"t": "10:00",
+"lane": "chart",
+"c": "9202",
+"n": "ANAホールディングス",
+"p0": 3363.0,
+"stop": 3225.88,
+"target": 3419.0,
+"v": "チャート条件クリア（出来高 2.7倍）",
+"url": "",
+"r": {},
+"seq": 2,
+"x": {
+"vol_ratio": 2.68,
+"gap_pct": 0.39,
+"rsi": 69.0,
+"ma25_pct": 5.91,
+"ma75_pct": 10.05,
+"atr_pct": 2.04,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "下降",
+"stage": "先行期",
+"room_pct": 1.67,
+"new_high": false,
+"rolled": false,
+"days_since_break": 14,
+"warnings": [
+"下降トレンド",
+"真上に抵抗線（余地+1.7%）"
+],
+"market": "悪化",
+"earn_days": 63,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
 }
 }
