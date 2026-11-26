@@ -10822,5 +10822,419 @@
 "vol_min": 1.5
 }
 }
+},
+"2026-11-26:chart:4543": {
+"d": "2026-11-26",
+"t": "09:15",
+"lane": "chart",
+"c": "4543",
+"n": "テルモ",
+"p0": 2696.5,
+"stop": 2508.15,
+"target": null,
+"v": "チャート条件クリア（出来高 10.3倍）",
+"url": "",
+"r": {},
+"seq": 3,
+"x": {
+"vol_ratio": 10.33,
+"gap_pct": 0.0,
+"rsi": 64.4,
+"ma25_pct": 8.34,
+"ma75_pct": 11.1,
+"atr_pct": 3.49,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "上昇",
+"stage": "利食い期",
+"new_high": false,
+"rolled": false,
+"days_since_break": 1,
+"warnings": [
+"飛びつき買い注意"
+],
+"market": "悪化",
+"earn_days": 77,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-26:chart:4307": {
+"d": "2026-11-26",
+"t": "09:15",
+"lane": "chart",
+"c": "4307",
+"n": "野村総合研究所",
+"p0": 6532.0,
+"stop": 6079.92,
+"target": null,
+"v": "チャート条件クリア（出来高 9.1倍）",
+"url": "",
+"r": {},
+"seq": 3,
+"x": {
+"vol_ratio": 9.13,
+"gap_pct": 0.0,
+"rsi": 65.5,
+"ma25_pct": 7.03,
+"ma75_pct": 19.6,
+"atr_pct": 3.46,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "横ばい",
+"stage": "利食い期",
+"new_high": false,
+"rolled": false,
+"days_since_break": 1,
+"warnings": [
+"飛びつき買い注意"
+],
+"market": "悪化",
+"earn_days": 63,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-26:chart:4507": {
+"d": "2026-11-26",
+"t": "09:15",
+"lane": "chart",
+"c": "4507",
+"n": "塩野義製薬",
+"p0": 3276.0,
+"stop": 3095.53,
+"target": 3705.0,
+"v": "チャート条件クリア（出来高 8.6倍）",
+"url": "",
+"r": {},
+"seq": 5,
+"x": {
+"vol_ratio": 8.6,
+"gap_pct": 0.0,
+"rsi": 64.5,
+"ma25_pct": 5.81,
+"ma75_pct": 11.24,
+"atr_pct": 2.75,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "下降",
+"stage": "先行期",
+"room_pct": 13.1,
+"new_high": false,
+"rolled": false,
+"days_since_break": 1,
+"warnings": [
+"下降トレンド"
+],
+"market": "悪化",
+"earn_days": 71,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-26:chart:7974": {
+"d": "2026-11-26",
+"t": "09:15",
+"lane": "chart",
+"c": "7974",
+"n": "任天堂",
+"p0": 8983.0,
+"stop": 8320.71,
+"target": 9180.0,
+"v": "チャート条件クリア（出来高 8.5倍）",
+"url": "",
+"r": {},
+"seq": 6,
+"x": {
+"vol_ratio": 8.51,
+"gap_pct": 0.0,
+"rsi": 56.6,
+"ma25_pct": 4.14,
+"ma75_pct": 6.25,
+"atr_pct": 3.69,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "上昇",
+"stage": "中立",
+"room_pct": 2.19,
+"new_high": false,
+"rolled": false,
+"days_since_break": 31,
+"warnings": [
+"真上に抵抗線（余地+2.2%）"
+],
+"market": "悪化",
+"earn_days": 68,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-26:chart:3402": {
+"d": "2026-11-26",
+"t": "09:15",
+"lane": "chart",
+"c": "3402",
+"n": "東レ",
+"p0": 1339.0,
+"stop": 1256.3,
+"target": 1353.5,
+"v": "チャート条件クリア（出来高 8.4倍）",
+"url": "",
+"r": {},
+"seq": 1,
+"x": {
+"vol_ratio": 8.38,
+"gap_pct": 0.0,
+"rsi": 58.0,
+"ma25_pct": 5.62,
+"ma75_pct": 5.62,
+"atr_pct": 3.09,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "横ばい",
+"stage": "利食い期",
+"room_pct": 1.08,
+"new_high": false,
+"rolled": false,
+"days_since_break": 12,
+"warnings": [
+"飛びつき買い注意",
+"真上に抵抗線（余地+1.1%）"
+],
+"market": "悪化",
+"earn_days": 76,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-26:chart:9983": {
+"d": "2026-11-26",
+"t": "09:15",
+"lane": "chart",
+"c": "9983",
+"n": "ファーストリテイリング",
+"p0": 86170.0,
+"stop": 81350.42,
+"target": 88690.0,
+"v": "チャート条件クリア（出来高 7.8倍）",
+"url": "",
+"r": {},
+"seq": 5,
+"x": {
+"vol_ratio": 7.75,
+"gap_pct": 0.0,
+"rsi": 68.8,
+"ma25_pct": 8.46,
+"ma75_pct": 15.3,
+"atr_pct": 2.8,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "横ばい",
+"stage": "利食い期",
+"room_pct": 2.92,
+"new_high": false,
+"rolled": false,
+"days_since_break": 15,
+"warnings": [
+"飛びつき買い注意",
+"真上に抵抗線（余地+2.9%）"
+],
+"market": "悪化",
+"earn_days": 49,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-26:chart:7751": {
+"d": "2026-11-26",
+"t": "09:15",
+"lane": "chart",
+"c": "7751",
+"n": "キヤノン",
+"p0": 4959.0,
+"stop": 4738.2,
+"target": 4968.0,
+"v": "チャート条件クリア（出来高 7.5倍）",
+"url": "",
+"r": {},
+"seq": 3,
+"x": {
+"vol_ratio": 7.51,
+"gap_pct": 0.0,
+"rsi": 60.9,
+"ma25_pct": 3.3,
+"ma75_pct": 6.35,
+"atr_pct": 2.23,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "上昇",
+"stage": "利食い期",
+"room_pct": 0.18,
+"new_high": false,
+"rolled": false,
+"days_since_break": 2,
+"warnings": [
+"飛びつき買い注意",
+"真上に抵抗線（余地+0.2%）"
+],
+"market": "悪化",
+"earn_days": 63,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-26:chart:8802": {
+"d": "2026-11-26",
+"t": "09:15",
+"lane": "chart",
+"c": "8802",
+"n": "三菱地所",
+"p0": 4150.0,
+"stop": 3888.45,
+"target": 4177.0,
+"v": "チャート条件クリア（出来高 7.4倍）",
+"url": "",
+"r": {},
+"seq": 2,
+"x": {
+"vol_ratio": 7.43,
+"gap_pct": 0.0,
+"rsi": 59.5,
+"ma25_pct": 4.71,
+"ma75_pct": 10.53,
+"atr_pct": 3.15,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "横ばい",
+"stage": "利食い期",
+"room_pct": 0.65,
+"new_high": false,
+"rolled": false,
+"days_since_break": 1,
+"warnings": [
+"飛びつき買い注意",
+"真上に抵抗線（余地+0.7%）"
+],
+"market": "悪化",
+"earn_days": 75,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-26:chart:3382": {
+"d": "2026-11-26",
+"t": "09:15",
+"lane": "chart",
+"c": "3382",
+"n": "セブン&アイ・ホールディングス",
+"p0": 2217.0,
+"stop": 2114.7,
+"target": 2262.0,
+"v": "チャート条件クリア（出来高 7.4倍）",
+"url": "",
+"r": {},
+"seq": 3,
+"x": {
+"vol_ratio": 7.39,
+"gap_pct": 0.0,
+"rsi": 57.9,
+"ma25_pct": 2.66,
+"ma75_pct": 7.03,
+"atr_pct": 2.31,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "横ばい",
+"stage": "利食い期",
+"room_pct": 2.03,
+"new_high": false,
+"rolled": false,
+"days_since_break": 18,
+"warnings": [
+"飛びつき買い注意",
+"真上に抵抗線（余地+2.0%）"
+],
+"market": "悪化",
+"earn_days": 42,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-26:chart:3659": {
+"d": "2026-11-26",
+"t": "09:15",
+"lane": "chart",
+"c": "3659",
+"n": "ネクソン",
+"p0": 3265.0,
+"stop": 3048.51,
+"target": 3349.0,
+"v": "チャート条件クリア（出来高 7.3倍）",
+"url": "",
+"r": {},
+"seq": 2,
+"x": {
+"vol_ratio": 7.29,
+"gap_pct": 0.0,
+"rsi": 66.5,
+"ma25_pct": 10.74,
+"ma75_pct": 11.91,
+"atr_pct": 3.32,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "下降",
+"stage": "先行期",
+"room_pct": 2.57,
+"new_high": false,
+"rolled": false,
+"days_since_break": 1,
+"warnings": [
+"下降トレンド",
+"真上に抵抗線（余地+2.6%）"
+],
+"market": "悪化",
+"earn_days": 77,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
 }
 }
