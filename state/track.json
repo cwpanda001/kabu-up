@@ -11278,5 +11278,50 @@
 "vol_min": 1.5
 }
 }
+},
+"2026-11-26:strict:9601": {
+"d": "2026-11-26",
+"t": "15:30",
+"lane": "strict",
+"c": "9601",
+"n": "松竹",
+"p0": 12680.0,
+"stop": 12079.68,
+"target": 13050.0,
+"v": "特別利益",
+"url": "https://www.release.tdnet.info/inbs/140120261119583704.pdf",
+"r": {},
+"seq": 1,
+"x": {
+"vol_ratio": 1.21,
+"gap_pct": -1.09,
+"rsi": 64.8,
+"ma25_pct": 5.6,
+"ma75_pct": 12.67,
+"atr_pct": 2.37,
+"after_close": true,
+"entry": "エントリー候補",
+"trend": "横ばい",
+"stage": "利食い期",
+"room_pct": 2.92,
+"new_high": false,
+"rolled": false,
+"days_since_break": 1,
+"warnings": [
+"飛びつき買い注意",
+"真上に抵抗線（余地+2.9%）"
+],
+"score": 1,
+"ambiguous": false,
+"ai": false,
+"market": "悪化",
+"earn_days": 49,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
 }
 }
