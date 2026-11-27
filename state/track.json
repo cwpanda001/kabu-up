@@ -11938,5 +11938,45 @@
 "vol_min": 1.5
 }
 }
+},
+"2026-11-27:strict:9889": {
+"d": "2026-11-27",
+"t": "15:30",
+"lane": "strict",
+"c": "9889",
+"n": "ＪＢＣＣ ＨＤ",
+"p0": 2250.0,
+"stop": 2062.59,
+"target": 2387.0,
+"v": "自己株式取得",
+"url": "https://www.release.tdnet.info/inbs/140120261126587156.pdf",
+"r": {},
+"seq": 1,
+"x": {
+"vol_ratio": 0.68,
+"gap_pct": 0.0,
+"rsi": 64.1,
+"ma25_pct": 6.62,
+"ma75_pct": 19.93,
+"atr_pct": 4.16,
+"after_close": true,
+"entry": "エントリー候補",
+"trend": "上昇",
+"stage": "中立",
+"room_pct": 6.09,
+"new_high": false,
+"rolled": false,
+"days_since_break": 33,
+"score": 2,
+"ambiguous": false,
+"ai": false,
+"market": "悪化",
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
 }
 }
