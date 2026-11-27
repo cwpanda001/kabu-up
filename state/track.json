@@ -11532,5 +11532,411 @@
 "vol_min": 1.5
 }
 }
+},
+"2026-11-27:chart:1802": {
+"d": "2026-11-27",
+"t": "09:15",
+"lane": "chart",
+"c": "1802",
+"n": "大林組",
+"p0": 3232.0,
+"stop": 3028.17,
+"target": 3343.0,
+"v": "チャート条件クリア（出来高 6.8倍）",
+"url": "",
+"r": {},
+"seq": 2,
+"x": {
+"vol_ratio": 6.77,
+"gap_pct": 0.0,
+"rsi": 54.9,
+"ma25_pct": 3.01,
+"ma75_pct": 6.32,
+"atr_pct": 3.15,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "下降",
+"stage": "先行期",
+"room_pct": 3.43,
+"new_high": false,
+"rolled": false,
+"days_since_break": 10,
+"warnings": [
+"下降トレンド",
+"真上に抵抗線（余地+3.4%）"
+],
+"market": "悪化",
+"earn_days": 74,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-27:chart:4661": {
+"d": "2026-11-27",
+"t": "09:15",
+"lane": "chart",
+"c": "4661",
+"n": "オリエンタルランド",
+"p0": 3872.0,
+"stop": 3640.14,
+"target": null,
+"v": "チャート条件クリア（出来高 6.5倍）",
+"url": "",
+"r": {},
+"seq": 4,
+"x": {
+"vol_ratio": 6.55,
+"gap_pct": 0.0,
+"rsi": 64.1,
+"ma25_pct": 6.63,
+"ma75_pct": 20.27,
+"atr_pct": 2.99,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "横ばい",
+"stage": "利食い期",
+"new_high": false,
+"rolled": false,
+"days_since_break": 18,
+"warnings": [
+"飛びつき買い注意"
+],
+"market": "悪化",
+"earn_days": 62,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-27:chart:6367": {
+"d": "2026-11-27",
+"t": "09:15",
+"lane": "chart",
+"c": "6367",
+"n": "ダイキン工業",
+"p0": 23860.0,
+"stop": 22802.43,
+"target": 25900.0,
+"v": "チャート条件クリア（出来高 6.2倍）",
+"url": "",
+"r": {},
+"seq": 2,
+"x": {
+"vol_ratio": 6.24,
+"gap_pct": 0.0,
+"rsi": 65.5,
+"ma25_pct": 5.94,
+"ma75_pct": 10.86,
+"atr_pct": 2.22,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "上昇",
+"stage": "利食い期",
+"room_pct": 8.55,
+"new_high": false,
+"rolled": false,
+"days_since_break": 15,
+"warnings": [
+"飛びつき買い注意"
+],
+"market": "悪化",
+"earn_days": 68,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-27:chart:1925": {
+"d": "2026-11-27",
+"t": "09:15",
+"lane": "chart",
+"c": "1925",
+"n": "大和ハウス工業",
+"p0": 2338.5,
+"stop": 2234.66,
+"target": 2399.5,
+"v": "チャート条件クリア（出来高 6.2倍）",
+"url": "",
+"r": {},
+"seq": 2,
+"x": {
+"vol_ratio": 6.22,
+"gap_pct": 0.0,
+"rsi": 52.7,
+"ma25_pct": 0.75,
+"ma75_pct": 2.05,
+"atr_pct": 2.22,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "下降",
+"stage": "先行期",
+"room_pct": 2.61,
+"new_high": false,
+"rolled": false,
+"warnings": [
+"下降トレンド",
+"真上に抵抗線（余地+2.6%）"
+],
+"market": "悪化",
+"earn_days": 74,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-27:chart:4578": {
+"d": "2026-11-27",
+"t": "09:15",
+"lane": "chart",
+"c": "4578",
+"n": "大塚ホールディングス",
+"p0": 12800.0,
+"stop": 12018.95,
+"target": null,
+"v": "チャート条件クリア（出来高 5.8倍）",
+"url": "",
+"r": {},
+"seq": 5,
+"x": {
+"vol_ratio": 5.81,
+"gap_pct": 0.0,
+"rsi": 59.4,
+"ma25_pct": 4.19,
+"ma75_pct": 6.72,
+"atr_pct": 3.05,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "横ばい",
+"stage": "利食い期",
+"new_high": false,
+"rolled": false,
+"days_since_break": 2,
+"warnings": [
+"飛びつき買い注意"
+],
+"market": "悪化",
+"earn_days": 77,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-27:chart:7832": {
+"d": "2026-11-27",
+"t": "09:15",
+"lane": "chart",
+"c": "7832",
+"n": "バンダイナムコホールディングス",
+"p0": 7405.0,
+"stop": 6855.47,
+"target": null,
+"v": "チャート条件クリア（出来高 5.6倍）",
+"url": "",
+"r": {},
+"seq": 6,
+"x": {
+"vol_ratio": 5.62,
+"gap_pct": 0.0,
+"rsi": 68.8,
+"ma25_pct": 10.52,
+"ma75_pct": 23.76,
+"atr_pct": 3.71,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "上昇",
+"stage": "中立",
+"new_high": false,
+"rolled": false,
+"days_since_break": 31,
+"market": "悪化",
+"earn_days": 69,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-27:chart:4523": {
+"d": "2026-11-27",
+"t": "09:15",
+"lane": "chart",
+"c": "4523",
+"n": "エーザイ",
+"p0": 5579.0,
+"stop": 5280.42,
+"target": null,
+"v": "チャート条件クリア（出来高 5.4倍）",
+"url": "",
+"r": {},
+"seq": 6,
+"x": {
+"vol_ratio": 5.45,
+"gap_pct": 0.0,
+"rsi": 68.2,
+"ma25_pct": 7.67,
+"ma75_pct": 13.24,
+"atr_pct": 2.68,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "横ばい",
+"stage": "利食い期",
+"new_high": false,
+"rolled": false,
+"days_since_break": 5,
+"warnings": [
+"飛びつき買い注意"
+],
+"market": "悪化",
+"earn_days": 69,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-27:chart:9007": {
+"d": "2026-11-27",
+"t": "09:15",
+"lane": "chart",
+"c": "9007",
+"n": "小田急電鉄",
+"p0": 1809.0,
+"stop": 1734.58,
+"target": 1810.0,
+"v": "チャート条件クリア（出来高 5.3倍）",
+"url": "",
+"r": {},
+"seq": 3,
+"x": {
+"vol_ratio": 5.34,
+"gap_pct": 0.0,
+"rsi": 53.3,
+"ma25_pct": 1.12,
+"ma75_pct": 2.5,
+"atr_pct": 2.06,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "横ばい",
+"stage": "利食い期",
+"room_pct": 0.06,
+"new_high": false,
+"rolled": false,
+"days_since_break": 13,
+"warnings": [
+"飛びつき買い注意",
+"真上に抵抗線（余地+0.1%）"
+],
+"market": "悪化",
+"earn_days": 76,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-27:chart:8766": {
+"d": "2026-11-27",
+"t": "09:15",
+"lane": "chart",
+"c": "8766",
+"n": "東京海上ホールディングス",
+"p0": 591.1,
+"stop": 556.28,
+"target": 612.3,
+"v": "チャート条件クリア（出来高 5.2倍）",
+"url": "",
+"r": {},
+"seq": 3,
+"x": {
+"vol_ratio": 5.23,
+"gap_pct": 0.0,
+"rsi": 56.2,
+"ma25_pct": 1.49,
+"ma75_pct": 9.01,
+"atr_pct": 2.95,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "上昇",
+"stage": "利食い期",
+"room_pct": 3.59,
+"new_high": false,
+"rolled": false,
+"days_since_break": 19,
+"warnings": [
+"飛びつき買い注意",
+"真上に抵抗線（余地+3.6%）"
+],
+"market": "悪化",
+"earn_days": 75,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
+},
+"2026-11-27:chart:5401": {
+"d": "2026-11-27",
+"t": "09:15",
+"lane": "chart",
+"c": "5401",
+"n": "日本製鉄",
+"p0": 680.0,
+"stop": 652.98,
+"target": 699.8,
+"v": "チャート条件クリア（出来高 5.1倍）",
+"url": "",
+"r": {},
+"seq": 2,
+"x": {
+"vol_ratio": 5.1,
+"gap_pct": 0.0,
+"rsi": 52.6,
+"ma25_pct": 0.76,
+"ma75_pct": 1.11,
+"atr_pct": 1.99,
+"after_close": false,
+"entry": "エントリー候補",
+"trend": "上昇",
+"stage": "中立",
+"room_pct": 2.91,
+"new_high": false,
+"rolled": false,
+"days_since_break": 84,
+"warnings": [
+"真上に抵抗線（余地+2.9%）"
+],
+"market": "悪化",
+"earn_days": 69,
+"cfg": {
+"rsi_max": 70,
+"max_gap": 5.0,
+"atr_stop": 2.0,
+"vol_min": 1.5
+}
+}
 }
 }
